@@ -25,6 +25,7 @@ image = (
 )
 
 @app.function(
+    gpu="A100",
     image=image,
     volumes={"/models": volume},
     secrets=[modal.Secret.from_name("huggingface")],
@@ -40,7 +41,6 @@ def run_baseline():
     print(result.stdout)
     print(result.stderr)
 
-    # Save predictions to volume so they persist across runs
     os.makedirs("/models/predictions", exist_ok=True)
     for d in ["pred", "pred_e"]:
         src = f"/app/experiments/LongBench/{d}"
@@ -49,44 +49,78 @@ def run_baseline():
             print(f"Saved {src} to volume")
 
 @app.function(
+    gpu="A100",
     image=image,
     volumes={"/models": volume},
-    timeout=300
+    secrets=[modal.Secret.from_name("huggingface")],
+    timeout=7200
 )
-def run_eval():
-    import subprocess, shutil, os, json
-
-    for d in ["pred", "pred_e"]:
-        src = f"/models/predictions/{d}"
-        dst = f"/app/experiments/LongBench/{d}"
-        if os.path.exists(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-
-    os.makedirs("/app/experiments/LongBench/H2O/results/mistral-7B-instruct-v0.2", exist_ok=True)
-
+def run_snapkv():
+    import subprocess, shutil, os
     result = subprocess.run([
-        "python", "eval.py",
-        "--model", "mistral-7B-instruct-v0.2"
+        "python", "pred_snap.py",
+        "--model", "mistral-7B-instruct-v0.2",
+        "--dataset", "qasper",
+        "--compress_args_path", "ablation_c4096_w32_k7_maxpool.json"
     ], cwd="/app/experiments/LongBench", capture_output=True, text=True)
     print(result.stdout)
     print(result.stderr)
 
-    # Print the result file
-    result_path = "/app/experiments/LongBench/H2O/results/mistral-7B-instruct-v0.2/result.json"
+    os.makedirs("/models/predictions_snapkv", exist_ok=True)
+    for d in ["pred", "pred_e"]:
+        src = f"/app/experiments/LongBench/{d}"
+        if os.path.exists(src):
+            shutil.copytree(src, f"/models/predictions_snapkv/{d}", dirs_exist_ok=True)
+            print(f"Saved {src} to volume")
+
+def _run_eval(pred_dir, model_name="mistral-7B-instruct-v0.2"):
+    import subprocess, shutil, os, json
+
+    for d in ["pred", "pred_e"]:
+        src = f"/models/{pred_dir}/{d}"
+        dst = f"/app/experiments/LongBench/{d}"
+        if os.path.exists(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+
+    os.makedirs(f"/app/experiments/LongBench/H2O/results/{model_name}", exist_ok=True)
+
+    result = subprocess.run([
+        "python", "eval.py",
+        "--model", model_name
+    ], cwd="/app/experiments/LongBench", capture_output=True, text=True)
+    print(result.stdout)
+    print(result.stderr)
+
+    result_path = f"/app/experiments/LongBench/H2O/results/{model_name}/result.json"
     if os.path.exists(result_path):
         with open(result_path) as f:
             print("=== RESULTS ===")
             print(json.dumps(json.load(f), indent=2))
-    else:
-        print("Result file not found, listing directory:")
-        for root, dirs, files in os.walk("/app/experiments/LongBench/H2O"):
-            for file in files:
-                print(os.path.join(root, file))
+
+@app.function(image=image, volumes={"/models": volume}, timeout=300)
+def run_eval():
+    _run_eval("predictions", "mistral-7B-instruct-v0.2")
+
+@app.function(image=image, volumes={"/models": volume}, timeout=300)
+def run_eval_snapkv():
+    _run_eval("predictions_snapkv", "mistral-7B-instruct-v0.2ablation_c4096_w32_k7_maxpool")
 
 @app.local_entrypoint()
 def main():
     run_baseline.remote()
 
 @app.local_entrypoint()
+def main_list():
+    list_volume.remote()
+
+@app.local_entrypoint()
 def main_eval():
     run_eval.remote()
+
+@app.local_entrypoint()
+def main_snapkv():
+    run_snapkv.remote()
+
+@app.local_entrypoint()
+def main_eval_snapkv():
+    run_eval_snapkv.remote()
