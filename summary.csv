@@ -1,0 +1,4 @@
+Method,gov_report,hotpotqa,lcc,qasper,Average,Peak GPU (GB),KV Cache (MB)
+baseline,32.87,42.77,55.86,32.99,41.12,23.2,9429
+snapkv,30.52,42.31,55.98,33.38,40.55,20.89,7072
+h2o,27.28,40.38,55.9,30.97,38.63,19.53,5672
