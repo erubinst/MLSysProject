@@ -5,6 +5,6 @@
   "update_policy": "incremental",
   "update_interval": 100,
   "n_clusters": 128,
-  "ranking_backend": "quest_bounds",
+  "ranking_backend": "reconstruction_error",
   "observation_window": 32
 }

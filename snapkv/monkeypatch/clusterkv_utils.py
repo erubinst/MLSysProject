@@ -1,5 +1,6 @@
 import torch
 from typing import Optional
+import math
 
 class OnlineKMeans:
     def __init__(self, n_clusters: int, dim: int, device: torch.device):
@@ -86,7 +87,8 @@ class OnlineKMeans:
 class ClusterKVCache:
     def __init__(self, n_clusters: int = 128, window_size: int = 64, max_capacity_prompt: int = 4096,
                  update_policy: str = 'incremental', update_interval: int = 100,
-                 page_size: int = 16):
+                 page_size: int = 16, ranking_backend: str = 'quest_bounds',
+                 observation_window: int = 32):
         """
         Args:
             n_clusters: Number of clusters for k-means
@@ -95,6 +97,8 @@ class ClusterKVCache:
             update_policy: 'static', 'incremental', or 'periodic'
             update_interval: For periodic updates, update every N tokens
             page_size: Number of KV tokens grouped into one retrieval page
+            ranking_backend: Importance ranking backend for prefix pages
+            observation_window: Number of prompt queries used by sampled attention backends
         """
         self.n_clusters = n_clusters
         self.window_size = window_size
@@ -102,6 +106,8 @@ class ClusterKVCache:
         self.update_policy = update_policy
         self.update_interval = update_interval
         self.page_size = page_size
+        self.ranking_backend = ranking_backend
+        self.observation_window = observation_window
 
         self.kmeans = None
         self.cluster_assignments = None
@@ -117,7 +123,54 @@ class ClusterKVCache:
         self.compressed_values = None
         self.tokens_processed = 0
 
-    def _score_pages(self, prefix_keys: torch.Tensor, current_query: torch.Tensor):
+    def _pad_to_pages(self, tensor: torch.Tensor):
+        bsz, num_heads, prefix_len, head_dim = tensor.shape
+        if prefix_len == 0:
+            empty_pages = tensor.new_empty((bsz, num_heads, 0, self.page_size, head_dim))
+            return empty_pages, prefix_len, 0
+
+        pad_len = (self.page_size - (prefix_len % self.page_size)) % self.page_size
+        if pad_len:
+            tensor = torch.cat([tensor, tensor.new_zeros(bsz, num_heads, pad_len, head_dim)], dim=2)
+
+        num_pages = tensor.shape[2] // self.page_size
+        pages = tensor.reshape(bsz, num_heads, num_pages, self.page_size, head_dim)
+        return pages, prefix_len, pad_len
+
+    def _sample_queries(self, query_states: torch.Tensor, mode: str):
+        q_len = query_states.shape[2]
+        if q_len == 0:
+            return query_states
+
+        sample_count = min(self.observation_window, q_len)
+        if sample_count <= 0 or sample_count == q_len:
+            return query_states
+
+        if mode == "tail":
+            indices = torch.arange(q_len - sample_count, q_len, device=query_states.device)
+        elif mode == "uniform":
+            indices = torch.linspace(0, q_len - 1, steps=sample_count, device=query_states.device)
+            indices = indices.round().long().unique(sorted=True)
+        else:
+            raise ValueError(f"Unknown query sampling mode: {mode}")
+
+        return query_states.index_select(2, indices)
+
+    def _aggregate_token_scores_to_pages(self, token_scores: torch.Tensor, prefix_len: int):
+        if prefix_len == 0:
+            return token_scores.new_empty(token_scores.shape[0], token_scores.shape[1], 0)
+
+        pad_len = (self.page_size - (prefix_len % self.page_size)) % self.page_size
+        if pad_len:
+            token_scores = torch.cat(
+                [token_scores, token_scores.new_full((token_scores.shape[0], token_scores.shape[1], pad_len), float("-inf"))],
+                dim=-1,
+            )
+
+        page_scores = token_scores.reshape(token_scores.shape[0], token_scores.shape[1], -1, self.page_size)
+        return page_scores.amax(dim=-1)
+
+    def _score_pages_quest_bounds(self, prefix_keys: torch.Tensor, current_query: torch.Tensor):
         """
         Estimate page criticality with Quest-style upper bounds.
 
@@ -135,12 +188,7 @@ class ClusterKVCache:
             empty_pages = prefix_keys.new_empty((bsz, num_heads, 0, self.page_size, head_dim))
             return empty_scores, empty_pages, prefix_len
 
-        pad_len = (self.page_size - (prefix_len % self.page_size)) % self.page_size
-        if pad_len:
-            prefix_keys = torch.cat([prefix_keys, prefix_keys.new_zeros(bsz, num_heads, pad_len, head_dim)], dim=2)
-
-        num_pages = prefix_keys.shape[2] // self.page_size
-        page_keys = prefix_keys.reshape(bsz, num_heads, num_pages, self.page_size, head_dim)
+        page_keys, _, _ = self._pad_to_pages(prefix_keys)
         page_min = page_keys.amin(dim=3)
         page_max = page_keys.amax(dim=3)
 
@@ -148,11 +196,116 @@ class ClusterKVCache:
         page_scores = torch.maximum(query * page_min, query * page_max).sum(dim=-1)
         return page_scores, page_keys, prefix_len
 
-    def _select_topk_pages(self, prefix_keys: torch.Tensor, prefix_values: torch.Tensor, current_query: torch.Tensor):
+    def _score_pages_prefill_attention(self, prefix_keys: torch.Tensor, query_states: torch.Tensor):
+        bsz, num_heads, prefix_len, _ = prefix_keys.shape
+        if prefix_len == 0:
+            empty_scores = prefix_keys.new_empty((bsz, num_heads, 0))
+            page_keys, _, _ = self._pad_to_pages(prefix_keys)
+            return empty_scores, page_keys, prefix_len
+
+        sampled_queries = self._sample_queries(query_states, mode="tail")
+        attn_logits = torch.einsum("bhqd,bhkd->bhqk", sampled_queries, prefix_keys) / math.sqrt(prefix_keys.shape[-1])
+        token_scores = torch.softmax(attn_logits, dim=-1).mean(dim=2)
+        page_scores = self._aggregate_token_scores_to_pages(token_scores, prefix_len)
+        page_keys, _, _ = self._pad_to_pages(prefix_keys)
+        return page_scores, page_keys, prefix_len
+
+    def _score_pages_h2o(self, prefix_keys: torch.Tensor, query_states: torch.Tensor):
+        bsz, num_heads, prefix_len, _ = prefix_keys.shape
+        if prefix_len == 0:
+            empty_scores = prefix_keys.new_empty((bsz, num_heads, 0))
+            page_keys, _, _ = self._pad_to_pages(prefix_keys)
+            return empty_scores, page_keys, prefix_len
+
+        sampled_queries = self._sample_queries(query_states, mode="uniform")
+        attn_logits = torch.einsum("bhqd,bhkd->bhqk", sampled_queries, prefix_keys) / math.sqrt(prefix_keys.shape[-1])
+        token_scores = torch.softmax(attn_logits, dim=-1).sum(dim=2)
+        page_scores = self._aggregate_token_scores_to_pages(token_scores, prefix_len)
+        page_keys, _, _ = self._pad_to_pages(prefix_keys)
+        return page_scores, page_keys, prefix_len
+
+    def _score_pages_reconstruction(self, prefix_keys: torch.Tensor):
+        bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
+        if prefix_len == 0:
+            empty_scores = prefix_keys.new_empty((bsz, num_heads, 0))
+            empty_pages = prefix_keys.new_empty((bsz, num_heads, 0, self.page_size, head_dim))
+            return empty_scores, empty_pages, prefix_len
+
+        page_keys, _, _ = self._pad_to_pages(prefix_keys)
+        page_center = page_keys.mean(dim=3, keepdim=True)
+        page_scores = (page_keys - page_center).pow(2).sum(dim=(3, 4))
+        return page_scores, page_keys, prefix_len
+
+    def _score_pages_expected_attention(self, prefix_keys: torch.Tensor, query_states: torch.Tensor):
         """
-        Select top scoring pages from the prefix and preserve chronological order.
+        Static Expected Attention approximation.
+
+        We estimate a future-query distribution from prompt queries only and use a
+        diagonal-Gaussian closed-form approximation:
+            E[exp(q·k / sqrt(d))] ~= exp(mu·k / sqrt(d) + 0.5 * (var·k^2) / d)
+
+        This is a practical static scorer for the current prompt-time compression
+        path. It does not model future RoPE positions explicitly.
         """
-        page_scores, page_keys, prefix_len = self._score_pages(prefix_keys, current_query)
+        bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
+        if prefix_len == 0:
+            empty_scores = prefix_keys.new_empty((bsz, num_heads, 0))
+            empty_pages = prefix_keys.new_empty((bsz, num_heads, 0, self.page_size, head_dim))
+            return empty_scores, empty_pages, prefix_len
+
+        sampled_queries = self._sample_queries(query_states, mode="uniform")
+        query_mean = sampled_queries.mean(dim=2)
+        query_var = sampled_queries.var(dim=2, unbiased=False)
+
+        token_scores = (
+            torch.einsum("bhd,bhkd->bhk", query_mean, prefix_keys) / math.sqrt(head_dim)
+            + 0.5 * torch.einsum("bhd,bhkd->bhk", query_var, prefix_keys.pow(2)) / head_dim
+        )
+        token_scores = torch.exp(token_scores)
+
+        page_scores = self._aggregate_token_scores_to_pages(token_scores, prefix_len)
+        page_keys, _, _ = self._pad_to_pages(prefix_keys)
+        return page_scores, page_keys, prefix_len
+
+    def _score_pages_random(self, prefix_keys: torch.Tensor):
+        bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
+        if prefix_len == 0:
+            empty_scores = prefix_keys.new_empty((bsz, num_heads, 0))
+            empty_pages = prefix_keys.new_empty((bsz, num_heads, 0, self.page_size, head_dim))
+            return empty_scores, empty_pages, prefix_len
+
+        page_keys, _, _ = self._pad_to_pages(prefix_keys)
+        page_scores = torch.rand(
+            (bsz, num_heads, page_keys.shape[2]),
+            device=prefix_keys.device,
+            dtype=prefix_keys.dtype,
+        )
+        return page_scores, page_keys, prefix_len
+
+    def _score_pages(self, prefix_keys: torch.Tensor, current_query: torch.Tensor, query_states: torch.Tensor):
+        if self.ranking_backend == "quest_bounds":
+            return self._score_pages_quest_bounds(prefix_keys, current_query)
+        if self.ranking_backend == "snapkv_prefill":
+            return self._score_pages_prefill_attention(prefix_keys, query_states)
+        if self.ranking_backend == "h2o_accum":
+            return self._score_pages_h2o(prefix_keys, query_states)
+        if self.ranking_backend == "reconstruction_error":
+            return self._score_pages_reconstruction(prefix_keys)
+        if self.ranking_backend == "expected_attention":
+            return self._score_pages_expected_attention(prefix_keys, query_states)
+        if self.ranking_backend == "random":
+            return self._score_pages_random(prefix_keys)
+        raise ValueError(f"Unsupported ranking backend: {self.ranking_backend}")
+
+    def _select_topk_pages(
+        self,
+        prefix_keys: torch.Tensor,
+        prefix_values: torch.Tensor,
+        current_query: torch.Tensor,
+        query_states: torch.Tensor,
+    ):
+        """Select top scoring pages from the prefix and preserve chronological order."""
+        page_scores, page_keys, prefix_len = self._score_pages(prefix_keys, current_query, query_states)
         if prefix_len == 0:
             return prefix_keys[:, :, :0, :], prefix_values[:, :, :0, :]
 
@@ -205,7 +358,7 @@ class ClusterKVCache:
             current_queries = query_states[:, :, -1, :]
             k_past = key_states[:, :, :-self.window_size, :]
             v_past = value_states[:, :, :-self.window_size, :]
-            k_past_compress, v_past_compress = self._select_topk_pages(k_past, v_past, current_queries)
+            k_past_compress, v_past_compress = self._select_topk_pages(k_past, v_past, current_queries, query_states)
 
             k_cur = key_states[:, :, -self.window_size:, :]
             v_cur = value_states[:, :, -self.window_size:, :]
@@ -229,6 +382,10 @@ def init_clusterkv(self):
             self.config.update_interval = 100
         if not hasattr(self.config, 'page_size'):
             self.config.page_size = 16
+        if not hasattr(self.config, 'ranking_backend'):
+            self.config.ranking_backend = 'quest_bounds'
+        if not hasattr(self.config, 'observation_window'):
+            self.config.observation_window = 32
 
     self.kv_cluster = ClusterKVCache(
         n_clusters=self.config.n_clusters,
@@ -236,5 +393,7 @@ def init_clusterkv(self):
         max_capacity_prompt=self.config.max_capacity_prompt,
         update_policy=self.config.update_policy,
         update_interval=self.config.update_interval,
-        page_size=self.config.page_size
+        page_size=self.config.page_size,
+        ranking_backend=self.config.ranking_backend,
+        observation_window=self.config.observation_window
     )

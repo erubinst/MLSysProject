@@ -49,13 +49,53 @@ METHODS = {
         ],
         "model_name": "mistral-7B-instruct-v0.2quest_c4096_w64_p16",
     },
-    "clusterkv": {
+    "clusterkv_quest_bounds_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "clusterkv",
             "--compress_args_path", "clusterkv_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2clusterkv_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_quest_bounds_static_c4096_w64_p16",
+    },
+    "clusterkv_snapkv_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_snapkv_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_snapkv_static_c4096_w64_p16",
+    },
+    "clusterkv_h2o_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_h2o_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_h2o_static_c4096_w64_p16",
+    },
+    "clusterkv_recon_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_recon_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_recon_static_c4096_w64_p16",
+    },
+    "clusterkv_expected_attention_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_expected_attention_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_expected_attention_static_c4096_w64_p16",
+    },
+    "clusterkv_random_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_random_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_random_static_c4096_w64_p16",
     },
     "h2o": {
         "script": "pred_h2o.py",
@@ -237,7 +277,7 @@ def generate_csv():
     # Header
     writer.writerow(["Method"] + all_datasets + ["Average", "Peak GPU (GB)", "KV Cache (MB)"])
 
-    for method in ["baseline", "snapkv", "quest", "clusterkv", "h2o", "ack"]:
+    for method in ["baseline", "snapkv", "quest", "clusterkv_quest_bounds_static", "clusterkv_snapkv_static", "clusterkv_h2o_static", "clusterkv_recon_static", "clusterkv_expected_attention_static", "clusterkv_random_static", "h2o", "ack"]:
         if method not in rows:
             continue
         scores = [rows[method].get(d) for d in all_datasets]
@@ -341,7 +381,62 @@ def main_quest():
 @app.local_entrypoint()
 def main_clusterkv():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv", dataset)
+        run_inference.remote("clusterkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_quest_bounds():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_quest_bounds_static():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_snapkv():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_snapkv_static():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_h2o():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_h2o_static():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_recon():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_recon_static():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_expected_attention_static():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_expected_attention_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_random():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_random_static", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv_random_static():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_random_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_baseline():
@@ -361,7 +456,62 @@ def main_eval_quest():
 @app.local_entrypoint()
 def main_eval_clusterkv():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv", dataset)
+        run_eval.remote("clusterkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_quest_bounds():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_quest_bounds_static():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_snapkv():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_snapkv_static():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_h2o():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_h2o_static():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_recon():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_recon_static():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_expected_attention_static():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_expected_attention_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_random():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_random_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_random_static():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_random_static", dataset)
 
 @app.local_entrypoint()
 def main_h2o():

@@ -5,6 +5,6 @@
   "update_policy": "incremental",
   "update_interval": 100,
   "n_clusters": 128,
-  "ranking_backend": "quest_bounds",
-  "observation_window": 32
+  "ranking_backend": "expected_attention",
+  "observation_window": 64
 }
