@@ -37,6 +37,24 @@ STATIC_METHODS = [
     "baseline",
     "snapkv_static",
     "quest_static",
+    "clusterkv_quest_bounds_static",
+    "clusterkv_quest_bounds_kmeans_static",
+    "clusterkv_quest_bounds_spherical_static",
+    "clusterkv_snapkv_static",
+    "clusterkv_snapkv_kmeans_static",
+    "clusterkv_snapkv_spherical_static",
+    "clusterkv_h2o_static",
+    "clusterkv_h2o_kmeans_static",
+    "clusterkv_h2o_spherical_static",
+    "clusterkv_recon_static",
+    "clusterkv_recon_kmeans_static",
+    "clusterkv_recon_spherical_static",
+    "clusterkv_expected_attention_static",
+    "clusterkv_expected_attention_kmeans_static",
+    "clusterkv_expected_attention_spherical_static",
+    "clusterkv_random_static",
+    "clusterkv_random_kmeans_static",
+    "clusterkv_random_spherical_static",
     "pagekv_quest_bounds_static",
     "pagekv_snapkv_static",
     "pagekv_h2o_static",
@@ -91,6 +109,150 @@ METHODS = {
             "--compress_args_path", "quest_c4096_w64_p16.json",
         ],
         "model_name": "mistral-7B-instruct-v0.2quest_static_c4096_w64_p16",
+    },
+    "clusterkv_quest_bounds_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_quest_bounds_static_c4096_w64_p16",
+    },
+    "clusterkv_quest_bounds_kmeans_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_kmeans_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_quest_bounds_kmeans_static_c4096_w64_p16",
+    },
+    "clusterkv_quest_bounds_spherical_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_spherical_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_quest_bounds_spherical_static_c4096_w64_p16",
+    },
+    "clusterkv_snapkv_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_snapkv_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_snapkv_static_c4096_w64_p16",
+    },
+    "clusterkv_snapkv_kmeans_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_snapkv_kmeans_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_snapkv_kmeans_static_c4096_w64_p16",
+    },
+    "clusterkv_snapkv_spherical_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_snapkv_spherical_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_snapkv_spherical_static_c4096_w64_p16",
+    },
+    "clusterkv_h2o_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_h2o_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_h2o_static_c4096_w64_p16",
+    },
+    "clusterkv_h2o_kmeans_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_h2o_kmeans_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_h2o_kmeans_static_c4096_w64_p16",
+    },
+    "clusterkv_h2o_spherical_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_h2o_spherical_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_h2o_spherical_static_c4096_w64_p16",
+    },
+    "clusterkv_recon_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_recon_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_recon_static_c4096_w64_p16",
+    },
+    "clusterkv_recon_kmeans_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_recon_kmeans_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_recon_kmeans_static_c4096_w64_p16",
+    },
+    "clusterkv_recon_spherical_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_recon_spherical_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_recon_spherical_static_c4096_w64_p16",
+    },
+    "clusterkv_expected_attention_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_expected_attention_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_expected_attention_static_c4096_w64_p16",
+    },
+    "clusterkv_expected_attention_kmeans_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_expected_attention_kmeans_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_expected_attention_kmeans_static_c4096_w64_p16",
+    },
+    "clusterkv_expected_attention_spherical_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_expected_attention_spherical_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_expected_attention_spherical_static_c4096_w64_p16",
+    },
+    "clusterkv_random_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_random_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_random_static_c4096_w64_p16",
+    },
+    "clusterkv_random_kmeans_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_random_kmeans_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_random_kmeans_static_c4096_w64_p16",
+    },
+    "clusterkv_random_spherical_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_random_spherical_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_random_spherical_static_c4096_w64_p16",
     },
     "pagekv_quest_bounds_static": {
         "script": "pred_snap.py",
@@ -478,6 +640,24 @@ def generate_csv(run_tag: str):
         "baseline",
         "snapkv_static",
         "quest_static",
+        "clusterkv_quest_bounds_static",
+        "clusterkv_quest_bounds_kmeans_static",
+        "clusterkv_quest_bounds_spherical_static",
+        "clusterkv_snapkv_static",
+        "clusterkv_snapkv_kmeans_static",
+        "clusterkv_snapkv_spherical_static",
+        "clusterkv_h2o_static",
+        "clusterkv_h2o_kmeans_static",
+        "clusterkv_h2o_spherical_static",
+        "clusterkv_recon_static",
+        "clusterkv_recon_kmeans_static",
+        "clusterkv_recon_spherical_static",
+        "clusterkv_expected_attention_static",
+        "clusterkv_expected_attention_kmeans_static",
+        "clusterkv_expected_attention_spherical_static",
+        "clusterkv_random_static",
+        "clusterkv_random_kmeans_static",
+        "clusterkv_random_spherical_static",
         "pagekv_quest_bounds_static",
         "pagekv_snapkv_static",
         "pagekv_h2o_static",
@@ -573,7 +753,7 @@ def main_validate_all_static(version: str = "1", run_tag: str = ""):
 @app.local_entrypoint()
 def main_validate_single(version: str = "1", run_tag: str = ""):
     """Run one-example validation for a single method. Edit method below."""
-    method = "pagekv_expected_attention_static"
+    method = "clusterkv_quest_bounds_static"
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     run_validation.remote(method, VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
@@ -638,84 +818,168 @@ def main_clusterkv(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_quest_bounds_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_quest_bounds_kmeans_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_quest_bounds_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_quest_bounds_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_snapkv_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_snapkv_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_snapkv_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_snapkv_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_snapkv_kmeans_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_snapkv_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_snapkv_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_h2o_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_h2o_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_h2o_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_h2o_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_h2o_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_h2o_kmeans_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_h2o_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_h2o_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_recon(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_recon_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_recon_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_recon_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_recon_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_recon_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_recon_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_recon_kmeans_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_recon_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_recon_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_expected_attention_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_expected_attention_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_expected_attention_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_expected_attention_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_expected_attention_kmeans_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_expected_attention_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_expected_attention_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_random(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_random_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_random_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_random_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_random_static", dataset, resolved_run_tag)
+        run_inference.remote("clusterkv_random_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_random_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_random_kmeans_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_clusterkv_random_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv_random_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_pagekv_quest_bounds_static(version: str = "1", run_tag: str = ""):
@@ -826,6 +1090,114 @@ def main_validate_tokenkv_expected_attention_static(version: str = "1", run_tag:
     run_validation.remote("tokenkv_expected_attention_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
+def main_validate_clusterkv_quest_bounds_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_quest_bounds_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_quest_bounds_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_quest_bounds_kmeans_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_quest_bounds_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_quest_bounds_spherical_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_snapkv_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_snapkv_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_snapkv_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_snapkv_kmeans_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_snapkv_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_snapkv_spherical_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_h2o_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_h2o_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_h2o_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_h2o_kmeans_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_h2o_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_h2o_spherical_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_recon_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_recon_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_recon_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_recon_kmeans_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_recon_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_recon_spherical_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_expected_attention_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_expected_attention_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_expected_attention_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_expected_attention_kmeans_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_expected_attention_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_expected_attention_spherical_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_random_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_random_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_random_kmeans_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_random_kmeans_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_validate_clusterkv_random_spherical_static(version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    run_validation.remote("clusterkv_random_spherical_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+
+@app.local_entrypoint()
 def main_eval_baseline(run_tag: str):
     for dataset in DATASETS:
         run_eval.remote("baseline", dataset, run_tag)
@@ -853,62 +1225,122 @@ def main_eval_quest_static(run_tag: str):
 @app.local_entrypoint()
 def main_eval_clusterkv(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_quest_bounds_static", dataset, run_tag)
+        run_eval.remote("clusterkv_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_quest_bounds_static", dataset, run_tag)
+        run_eval.remote("clusterkv_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_quest_bounds_static", dataset, run_tag)
+        run_eval.remote("clusterkv_quest_bounds_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_quest_bounds_kmeans_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_quest_bounds_kmeans_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_quest_bounds_spherical_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_quest_bounds_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_snapkv_static", dataset, run_tag)
+        run_eval.remote("clusterkv_snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_snapkv_static", dataset, run_tag)
+        run_eval.remote("clusterkv_snapkv_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_snapkv_kmeans_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_snapkv_kmeans_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_snapkv_spherical_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_snapkv_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_h2o_static", dataset, run_tag)
+        run_eval.remote("clusterkv_h2o_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_h2o_static", dataset, run_tag)
+        run_eval.remote("clusterkv_h2o_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_h2o_kmeans_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_h2o_kmeans_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_h2o_spherical_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_h2o_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_recon_static", dataset, run_tag)
+        run_eval.remote("clusterkv_recon_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_recon_static", dataset, run_tag)
+        run_eval.remote("clusterkv_recon_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_recon_kmeans_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_recon_kmeans_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_recon_spherical_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_recon_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_expected_attention_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_expected_attention_static", dataset, run_tag)
+        run_eval.remote("clusterkv_expected_attention_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_expected_attention_kmeans_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_expected_attention_kmeans_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_expected_attention_spherical_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_expected_attention_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_random_static", dataset, run_tag)
+        run_eval.remote("clusterkv_random_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_random_static", dataset, run_tag)
+        run_eval.remote("clusterkv_random_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_random_kmeans_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_random_kmeans_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_clusterkv_random_spherical_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv_random_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_pagekv_quest_bounds_static(run_tag: str):

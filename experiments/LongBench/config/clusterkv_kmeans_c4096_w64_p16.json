@@ -5,7 +5,8 @@
   "update_policy": "incremental",
   "update_interval": 100,
   "n_clusters": 128,
-  "ranking_backend": "random",
+  "ranking_backend": "quest_bounds",
   "observation_window": 32,
-  "selection_granularity": "cluster"
+  "selection_granularity": "cluster",
+  "clustering_backend": "kmeans"
 }

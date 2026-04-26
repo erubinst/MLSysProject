@@ -7,5 +7,6 @@
   "n_clusters": 128,
   "ranking_backend": "random",
   "observation_window": 32,
-  "selection_granularity": "cluster"
+  "selection_granularity": "cluster",
+  "clustering_backend": "spherical_kmeans"
 }

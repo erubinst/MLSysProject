@@ -6,5 +6,6 @@
   "update_interval": 100,
   "n_clusters": 128,
   "ranking_backend": "expected_attention",
-  "observation_window": 64
+  "observation_window": 64,
+  "selection_granularity": "cluster"
 }

@@ -84,7 +84,8 @@ def get_pred_single_gpu(data, max_length, max_gen,
                         n_clusters=None,
                         ranking_backend=None,
                         observation_window=None,
-                        selection_granularity=None):
+                        selection_granularity=None,
+                        clustering_backend=None):
     model, tokenizer = load_model_and_tokenizer(model2path[model_name], model_name, device="cuda", compress=compress)
     device = model.device
 
@@ -125,6 +126,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
                         cfg.ranking_backend = ranking_backend
                         cfg.observation_window = observation_window
                         cfg.selection_granularity = selection_granularity
+                        cfg.clustering_backend = clustering_backend
             else:
                 raise ValueError(f"Compression method {method} not supported")
 

@@ -88,7 +88,8 @@ class ClusterKVCache:
     def __init__(self, n_clusters: int = 128, window_size: int = 64, max_capacity_prompt: int = 4096,
                  update_policy: str = 'incremental', update_interval: int = 100,
                  page_size: int = 16, ranking_backend: str = 'quest_bounds',
-                 observation_window: int = 32, selection_granularity: str = 'page'):
+                 observation_window: int = 32, selection_granularity: str = 'page',
+                 clustering_backend: str = 'kmeanspp'):
         """
         Args:
             n_clusters: Number of clusters for k-means
@@ -99,7 +100,8 @@ class ClusterKVCache:
             page_size: Number of KV tokens grouped into one retrieval page
             ranking_backend: Importance ranking backend for prefix pages
             observation_window: Number of prompt queries used by sampled attention backends
-            selection_granularity: 'page' or 'token'
+            selection_granularity: 'page', 'token', or 'cluster'
+            clustering_backend: 'kmeans', 'kmeanspp', or 'spherical_kmeans'
         """
         self.n_clusters = n_clusters
         self.window_size = window_size
@@ -110,6 +112,7 @@ class ClusterKVCache:
         self.ranking_backend = ranking_backend
         self.observation_window = observation_window
         self.selection_granularity = selection_granularity
+        self.clustering_backend = clustering_backend
 
         self.kmeans = None
         self.cluster_assignments = None
@@ -171,6 +174,85 @@ class ClusterKVCache:
 
         page_scores = token_scores.reshape(token_scores.shape[0], token_scores.shape[1], -1, self.page_size)
         return page_scores.amax(dim=-1)
+
+    def _run_kmeans_single(self, data: torch.Tensor):
+        """
+        Lightweight static k-means for one (batch, head) prefix slice.
+        Returns assignments and centroids.
+        """
+        n_tokens, head_dim = data.shape
+        if n_tokens == 0:
+            return data.new_empty((0,), dtype=torch.long), data.new_empty((0, head_dim))
+
+        k = min(self.n_clusters, n_tokens)
+        spherical = self.clustering_backend == "spherical_kmeans"
+        if spherical:
+            work_data = torch.nn.functional.normalize(data, dim=-1)
+        else:
+            work_data = data
+
+        centroids = torch.empty((k, head_dim), device=data.device, dtype=data.dtype)
+
+        if self.clustering_backend == "kmeans":
+            init_indices = torch.randperm(n_tokens, device=data.device)[:k]
+            centroids.copy_(work_data[init_indices])
+        elif self.clustering_backend in ("kmeanspp", "spherical_kmeans"):
+            first_idx = torch.randint(0, n_tokens, (1,), device=data.device)
+            centroids[0] = work_data[first_idx]
+            closest_dist_sq = ((work_data - centroids[0:1]) ** 2).sum(dim=-1)
+            for i in range(1, k):
+                total = closest_dist_sq.sum()
+                if total <= 0:
+                    next_idx = torch.randint(0, n_tokens, (1,), device=data.device)
+                else:
+                    probs = closest_dist_sq / total
+                    next_idx = torch.multinomial(probs, 1)
+                centroids[i] = work_data[next_idx]
+                new_dist_sq = ((work_data - centroids[i : i + 1]) ** 2).sum(dim=-1)
+                closest_dist_sq = torch.minimum(closest_dist_sq, new_dist_sq)
+        else:
+            raise ValueError(f"Unsupported clustering backend: {self.clustering_backend}")
+
+        assignments = None
+        for _ in range(8):
+            if spherical:
+                similarities = work_data @ centroids.T
+                new_assignments = similarities.argmax(dim=-1)
+            else:
+                distances = torch.cdist(work_data, centroids)
+                new_assignments = distances.argmin(dim=-1)
+            if assignments is not None and torch.equal(new_assignments, assignments):
+                break
+            assignments = new_assignments
+
+            for cluster_id in range(k):
+                mask = assignments == cluster_id
+                if mask.any():
+                    centroids[cluster_id] = work_data[mask].mean(dim=0)
+                    if spherical:
+                        centroids[cluster_id] = torch.nn.functional.normalize(centroids[cluster_id], dim=-1)
+
+        return assignments, centroids
+
+    def _cluster_prefix(self, prefix_keys: torch.Tensor):
+        """
+        Cluster prefix tokens independently per batch/head.
+        """
+        bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
+        assignments = torch.empty((bsz, num_heads, prefix_len), device=prefix_keys.device, dtype=torch.long)
+        centroids = []
+        cluster_counts = torch.empty((bsz, num_heads), device=prefix_keys.device, dtype=torch.long)
+
+        for b in range(bsz):
+            head_centroids = []
+            for h in range(num_heads):
+                assign_bh, centroids_bh = self._run_kmeans_single(prefix_keys[b, h])
+                assignments[b, h] = assign_bh
+                cluster_counts[b, h] = centroids_bh.shape[0]
+                head_centroids.append(centroids_bh)
+            centroids.append(head_centroids)
+
+        return assignments, centroids, cluster_counts
 
     def _score_pages_quest_bounds(self, prefix_keys: torch.Tensor, current_query: torch.Tensor):
         """
@@ -390,6 +472,76 @@ class ClusterKVCache:
         selected_values = prefix_values.gather(dim=2, index=gather_index)
         return selected_keys, selected_values
 
+    def _select_topk_clusters(
+        self,
+        prefix_keys: torch.Tensor,
+        prefix_values: torch.Tensor,
+        current_query: torch.Tensor,
+        query_states: torch.Tensor,
+    ):
+        token_scores = self._score_tokens(prefix_keys, current_query, query_states)
+        prefix_len = prefix_keys.shape[2]
+        if prefix_len == 0:
+            return prefix_keys[:, :, :0, :], prefix_values[:, :, :0, :]
+
+        token_budget = max(self.max_capacity_prompt - self.window_size, 0)
+        token_budget = min(token_budget, prefix_len)
+        if token_budget == 0:
+            return prefix_keys[:, :, :0, :], prefix_values[:, :, :0, :]
+
+        assignments, _, cluster_counts = self._cluster_prefix(prefix_keys)
+        bsz, num_heads, _, head_dim = prefix_keys.shape
+        selected_keys = prefix_keys.new_empty((bsz, num_heads, token_budget, head_dim))
+        selected_values = prefix_values.new_empty((bsz, num_heads, token_budget, head_dim))
+
+        for b in range(bsz):
+            for h in range(num_heads):
+                scores_bh = token_scores[b, h]
+                assign_bh = assignments[b, h]
+                num_clusters = int(cluster_counts[b, h].item())
+
+                cluster_scores = scores_bh.new_full((num_clusters,), float("-inf"))
+                for cluster_id in range(num_clusters):
+                    mask = assign_bh == cluster_id
+                    if mask.any():
+                        cluster_scores[cluster_id] = scores_bh[mask].amax()
+
+                ranked_clusters = cluster_scores.argsort(descending=True)
+                selected_indices = []
+                remaining = token_budget
+                for cluster_id in ranked_clusters.tolist():
+                    member_indices = torch.nonzero(assign_bh == cluster_id, as_tuple=False).squeeze(-1)
+                    if member_indices.numel() == 0:
+                        continue
+
+                    if member_indices.numel() <= remaining:
+                        selected_indices.append(member_indices)
+                        remaining -= member_indices.numel()
+                    else:
+                        member_scores = scores_bh[member_indices]
+                        keep_local = member_scores.topk(remaining, dim=0).indices
+                        kept = member_indices[keep_local].sort().values
+                        selected_indices.append(kept)
+                        remaining = 0
+
+                    if remaining == 0:
+                        break
+
+                if selected_indices:
+                    selected_indices = torch.cat(selected_indices).sort().values
+                else:
+                    selected_indices = torch.empty((0,), device=prefix_keys.device, dtype=torch.long)
+
+                if selected_indices.numel() < token_budget:
+                    filler = scores_bh.topk(token_budget, dim=0).indices.sort().values
+                    selected_indices = filler
+
+                gather_index = selected_indices.unsqueeze(-1).expand(-1, head_dim)
+                selected_keys[b, h] = prefix_keys[b, h].gather(dim=0, index=gather_index)
+                selected_values[b, h] = prefix_values[b, h].gather(dim=0, index=gather_index)
+
+        return selected_keys, selected_values
+
     def _select_topk_pages(
         self,
         prefix_keys: torch.Tensor,
@@ -455,6 +607,8 @@ class ClusterKVCache:
                 k_past_compress, v_past_compress = self._select_topk_tokens(k_past, v_past, current_queries, query_states)
             elif self.selection_granularity == 'page':
                 k_past_compress, v_past_compress = self._select_topk_pages(k_past, v_past, current_queries, query_states)
+            elif self.selection_granularity == 'cluster':
+                k_past_compress, v_past_compress = self._select_topk_clusters(k_past, v_past, current_queries, query_states)
             else:
                 raise ValueError(f"Unsupported selection granularity: {self.selection_granularity}")
 
@@ -485,7 +639,9 @@ def init_clusterkv(self):
         if not hasattr(self.config, 'observation_window'):
             self.config.observation_window = 32
         if not hasattr(self.config, 'selection_granularity'):
-            self.config.selection_granularity = 'page'
+            self.config.selection_granularity = 'cluster'
+        if not hasattr(self.config, 'clustering_backend'):
+            self.config.clustering_backend = 'kmeanspp'
 
     self.kv_cluster = ClusterKVCache(
         n_clusters=self.config.n_clusters,
@@ -496,5 +652,6 @@ def init_clusterkv(self):
         page_size=self.config.page_size,
         ranking_backend=self.config.ranking_backend,
         observation_window=self.config.observation_window,
-        selection_granularity=self.config.selection_granularity
+        selection_granularity=self.config.selection_granularity,
+        clustering_backend=self.config.clustering_backend
     )

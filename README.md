@@ -110,6 +110,14 @@ Example:
 modal run --detach test.py::main_validate_all_static --version 4
 ```
 
+Cluster-specific examples:
+
+```bash
+modal run --detach test.py::main_validate_clusterkv_quest_bounds_static --version 4
+modal run --detach test.py::main_validate_clusterkv_quest_bounds_kmeans_static --version 4
+modal run --detach test.py::main_validate_clusterkv_expected_attention_spherical_static --version 4
+```
+
 Validation artifacts are saved under:
 
 ```text
@@ -197,6 +205,26 @@ Status: `done`
 - `quest_static`
 - `h2o_static`
 
+### Cluster-level static methods
+- `clusterkv_quest_bounds_static` (`kmeanspp` default)
+- `clusterkv_quest_bounds_kmeans_static`
+- `clusterkv_quest_bounds_spherical_static`
+- `clusterkv_snapkv_static`
+- `clusterkv_snapkv_kmeans_static`
+- `clusterkv_snapkv_spherical_static`
+- `clusterkv_h2o_static`
+- `clusterkv_h2o_kmeans_static`
+- `clusterkv_h2o_spherical_static`
+- `clusterkv_recon_static`
+- `clusterkv_recon_kmeans_static`
+- `clusterkv_recon_spherical_static`
+- `clusterkv_expected_attention_static`
+- `clusterkv_expected_attention_kmeans_static`
+- `clusterkv_expected_attention_spherical_static`
+- `clusterkv_random_static`
+- `clusterkv_random_kmeans_static`
+- `clusterkv_random_spherical_static`
+
 ### Page-level static methods
 - `pagekv_quest_bounds_static`
 - `pagekv_snapkv_static`
@@ -213,8 +241,16 @@ Status: `done`
 - `tokenkv_expected_attention_static`
 - `tokenkv_random_static`
 
-### Compatibility aliases
-Older `clusterkv_*_static` entrypoints are kept as compatibility aliases and currently point to the page-level family.
+### Clustering backends
+Current real `clusterkv` clustering backends:
+- `kmeans`
+- `kmeanspp`
+- `spherical_kmeans`
+
+The naming convention is:
+- no suffix change, e.g. `clusterkv_h2o_static`: `kmeanspp`
+- `_kmeans_static`: plain Euclidean k-means
+- `_spherical_static`: spherical k-means
 
 ## Current Ablation Semantics
 
@@ -225,6 +261,20 @@ Older `clusterkv_*_static` entrypoints are kept as compatibility aliases and cur
 ### `quest_static`
 - separate page-level retrieval path inspired by Quest
 - static prompt-time approximation
+
+### `clusterkv_*_static`
+- real static cluster selection path
+- cluster prefix keys per `(batch, head)` using a k-means-family backend
+- score tokens with the selected ranking backend
+- aggregate token scores to cluster scores
+- recall top clusters until the token budget is filled
+
+Examples:
+- `clusterkv_quest_bounds_static`: `quest_bounds` ranking + `kmeanspp`
+- `clusterkv_quest_bounds_kmeans_static`: `quest_bounds` ranking + `kmeans`
+- `clusterkv_quest_bounds_spherical_static`: `quest_bounds` ranking + `spherical_kmeans`
+- `clusterkv_h2o_static`: `h2o_accum` ranking + `kmeanspp`
+- `clusterkv_expected_attention_spherical_static`: `expected_attention` ranking + `spherical_kmeans`
 
 ### `pagekv_*_static`
 - score prefix pages
@@ -238,6 +288,7 @@ Older `clusterkv_*_static` entrypoints are kept as compatibility aliases and cur
 - experiment label exists
 - dedicated standalone runner is still stale in this workspace
 - nearest runnable approximations are:
+  - `clusterkv_h2o_static`
   - `pagekv_h2o_static`
   - `tokenkv_h2o_static`
 
