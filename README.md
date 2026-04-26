@@ -12,6 +12,43 @@ git clone git@github.com:FasterDecoding/SnapKV.git
 cd SnapKV
 pip install -e .
 ```
+
+### Local environment for LongBench experiments
+The current experiment code in this repository has been tested with:
+
+```bash
+pip install "transformers==4.37.0" "datasets==2.19.2"
+```
+
+If you want to run the LongBench scripts locally, a typical setup is:
+
+```bash
+conda create -n snapkv-exp python=3.10 -y
+conda activate snapkv-exp
+pip install -e .
+pip install "transformers==4.37.0" "datasets==2.19.2"
+```
+
+### Modal setup
+The repository includes a Modal-based experiment runner in [`test.py`](./test.py).
+
+Install and authenticate Modal:
+
+```bash
+pip install modal
+modal setup
+```
+
+If your model downloads require Hugging Face authentication, create a Modal secret named `huggingface` containing your Hugging Face token (for example as `HF_TOKEN`). The Modal functions in [`test.py`](./test.py) expect that secret to exist.
+
+### Running Modal jobs without keeping the CLI open
+Use `modal run --detach ...` to submit a job and return immediately without keeping the local terminal attached:
+
+```bash
+modal run --detach test.py::main_pagekv_expected_attention_static --version 3
+```
+
+This is the recommended way to submit longer inference or evaluation jobs if you do not want to keep the CLI session open.
 ## Quick Start
 ### Use SnapKV-optimized Models
 For example: 
@@ -179,6 +216,73 @@ The Modal experiment file [`test.py`](./test.py) contains ready-to-run entrypoin
 - `main_tokenkv_random_static`
 
 Matching `main_eval_*` entrypoints score completed runs and `main_csv` aggregates saved results.
+
+### Run versioning and detached Modal runs
+The Modal experiment entrypoints now support run versioning. Every submission batch can write into a dedicated run directory:
+
+- `/models/runs/<run_tag>/predictions/...`
+- `/models/runs/<run_tag>/results/...`
+- `/models/runs/<run_tag>/validations/...`
+
+Run tags are generated as:
+- `v<version>_<timestamp>`
+
+Examples:
+
+Start an inference run in detached mode:
+```bash
+modal run --detach test.py::main_pagekv_expected_attention_static --version 3
+```
+
+This prints a run tag such as:
+```text
+Run tag: v3_20260426_153012
+```
+
+Use that exact run tag for evaluation and CSV generation:
+```bash
+modal run --detach test.py::main_eval_pagekv_expected_attention_static --run-tag v3_20260426_153012
+modal run --detach test.py::main_csv --run-tag v3_20260426_153012
+```
+
+You can also provide the run tag explicitly at inference time instead of generating one from a version:
+```bash
+modal run --detach test.py::main_tokenkv_h2o_static --run-tag v7_custom
+```
+
+If you do not pass `--run-tag`, the entrypoint creates one automatically from:
+- the version number
+- the current timestamp
+
+This lets you submit multiple runs with the same logical version while still keeping their artifacts separate.
+
+The same pattern applies to validation:
+```bash
+modal run --detach test.py::main_validate_all_static --version 4
+```
+
+### One-example Modal validation
+The Modal experiment file also contains a one-example validation flow for sanity checking method wiring before or after running the full benchmark.
+
+What it does:
+- runs a single held-out LongBench example for one method,
+- saves the prediction and gold answers to the Modal volume,
+- records simple validation fields such as:
+  - `ran_successfully`
+  - `pred_file_found`
+  - `nonempty_pred`
+  - `exact_any`
+  - `contains_any_answer`
+
+Current validation entrypoints include:
+- `main_validate_all_static`
+- `main_validate_single`
+- `main_validate_snapkv_static`
+- `main_validate_quest_static`
+- `main_validate_pagekv_expected_attention_static`
+- `main_validate_tokenkv_expected_attention_static`
+
+The validation artifacts are saved under `/models/validations/` in the Modal volume.
 
 ## TODO
 - [ ] Add observation experiments for reduplication.

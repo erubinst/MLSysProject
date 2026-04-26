@@ -30,6 +30,8 @@ def parse_args(args=None):
                         help="Compression method to enable when --compress_args_path is provided")
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('--dataset', type=str, default='qasper', help="Dataset to evaluate on")
+    parser.add_argument('--limit', type=int, default=None, help="Optional number of examples to run")
+    parser.add_argument('--sample_offset', type=int, default=0, help="Optional starting index into the dataset")
     return parser.parse_args(args)
 
 def build_chat(tokenizer, prompt, model_name):
@@ -297,6 +299,10 @@ if __name__ == '__main__':
     prompt_format = dataset2prompt[dataset]
     max_gen = dataset2maxlen[dataset]
     data_all = [data_sample for data_sample in data]
+    if args.sample_offset or args.limit is not None:
+        start = max(args.sample_offset, 0)
+        end = None if args.limit is None else start + max(args.limit, 0)
+        data_all = data_all[start:end]
 
     if compress_args is not None:
         get_pred_single_gpu(
