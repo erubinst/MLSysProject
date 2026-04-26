@@ -36,71 +36,119 @@ METHODS = {
         "extra_args": [],
         "model_name": "mistral-7B-instruct-v0.2",
     },
-    "snapkv": {
+    "snapkv_static": {
         "script": "pred_snap.py",
         "extra_args": ["--compress_args_path", "ablation_c4096_w32_k7_maxpool.json"],
-        "model_name": "mistral-7B-instruct-v0.2ablation_c4096_w32_k7_maxpool",
+        "model_name": "mistral-7B-instruct-v0.2snapkv_static_c4096_w32_k7_maxpool",
     },
-    "quest": {
+    "quest_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "quest",
             "--compress_args_path", "quest_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2quest_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2quest_static_c4096_w64_p16",
     },
-    "clusterkv_quest_bounds_static": {
+    "pagekv_quest_bounds_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "clusterkv",
-            "--compress_args_path", "clusterkv_c4096_w64_p16.json",
+            "--compress_args_path", "pagekv_quest_bounds_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2clusterkv_quest_bounds_static_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2pagekv_quest_bounds_static_c4096_w64_p16",
     },
-    "clusterkv_snapkv_static": {
+    "pagekv_snapkv_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "clusterkv",
-            "--compress_args_path", "clusterkv_snapkv_c4096_w64_p16.json",
+            "--compress_args_path", "pagekv_snapkv_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2clusterkv_snapkv_static_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2pagekv_snapkv_static_c4096_w64_p16",
     },
-    "clusterkv_h2o_static": {
+    "pagekv_h2o_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "clusterkv",
-            "--compress_args_path", "clusterkv_h2o_c4096_w64_p16.json",
+            "--compress_args_path", "pagekv_h2o_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2clusterkv_h2o_static_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2pagekv_h2o_static_c4096_w64_p16",
     },
-    "clusterkv_recon_static": {
+    "pagekv_recon_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "clusterkv",
-            "--compress_args_path", "clusterkv_recon_c4096_w64_p16.json",
+            "--compress_args_path", "pagekv_recon_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2clusterkv_recon_static_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2pagekv_recon_static_c4096_w64_p16",
     },
-    "clusterkv_expected_attention_static": {
+    "pagekv_expected_attention_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "clusterkv",
-            "--compress_args_path", "clusterkv_expected_attention_c4096_w64_p16.json",
+            "--compress_args_path", "pagekv_expected_attention_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2clusterkv_expected_attention_static_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2pagekv_expected_attention_static_c4096_w64_p16",
     },
-    "clusterkv_random_static": {
+    "pagekv_random_static": {
         "script": "pred_snap.py",
         "extra_args": [
             "--method", "clusterkv",
-            "--compress_args_path", "clusterkv_random_c4096_w64_p16.json",
+            "--compress_args_path", "pagekv_random_c4096_w64_p16.json",
         ],
-        "model_name": "mistral-7B-instruct-v0.2clusterkv_random_static_c4096_w64_p16",
+        "model_name": "mistral-7B-instruct-v0.2pagekv_random_static_c4096_w64_p16",
     },
-    "h2o": {
+    "tokenkv_quest_bounds_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_quest_bounds_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_quest_bounds_static_c4096_w64",
+    },
+    "tokenkv_snapkv_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_snapkv_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_snapkv_static_c4096_w64",
+    },
+    "tokenkv_h2o_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_h2o_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_h2o_static_c4096_w64",
+    },
+    "tokenkv_recon_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_recon_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_recon_static_c4096_w64",
+    },
+    "tokenkv_expected_attention_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_expected_attention_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_expected_attention_static_c4096_w64",
+    },
+    "tokenkv_random_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_random_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_random_static_c4096_w64",
+    },
+    "h2o_static": {
         "script": "pred_h2o.py",
         "extra_args": ["--max_capacity_prompt", "2048", "--window_size", "32"],
-        "model_name": "mistral-7B-instruct-v0.2-h2o-budget2048",
+        "model_name": "mistral-7B-instruct-v0.2h2o_static_budget2048",
     },
 }
 
@@ -277,7 +325,25 @@ def generate_csv():
     # Header
     writer.writerow(["Method"] + all_datasets + ["Average", "Peak GPU (GB)", "KV Cache (MB)"])
 
-    for method in ["baseline", "snapkv", "quest", "clusterkv_quest_bounds_static", "clusterkv_snapkv_static", "clusterkv_h2o_static", "clusterkv_recon_static", "clusterkv_expected_attention_static", "clusterkv_random_static", "h2o", "ack"]:
+    for method in [
+        "baseline",
+        "snapkv_static",
+        "quest_static",
+        "pagekv_quest_bounds_static",
+        "pagekv_snapkv_static",
+        "pagekv_h2o_static",
+        "pagekv_recon_static",
+        "pagekv_expected_attention_static",
+        "pagekv_random_static",
+        "tokenkv_quest_bounds_static",
+        "tokenkv_snapkv_static",
+        "tokenkv_h2o_static",
+        "tokenkv_recon_static",
+        "tokenkv_expected_attention_static",
+        "tokenkv_random_static",
+        "h2o_static",
+        "ack",
+    ]:
         if method not in rows:
             continue
         scores = [rows[method].get(d) for d in all_datasets]
@@ -323,7 +389,7 @@ def generate_csv():
 @app.local_entrypoint()
 def main():
     """Run inference for all methods and datasets, then eval and generate CSV."""
-    methods_to_run = ["baseline", "snapkv", "quest"]
+    methods_to_run = ["baseline", "snapkv_static", "quest_static"]
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"\nSubmitting {method} / {dataset}...")
@@ -333,7 +399,7 @@ def main():
 @app.local_entrypoint()
 def main_eval_all():
     """Score all completed inference runs and generate CSV."""
-    methods_to_run = ["baseline", "snapkv", "quest"]
+    methods_to_run = ["baseline", "snapkv_static", "quest_static"]
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"Evaluating {method} / {dataset}...")
@@ -371,72 +437,142 @@ def main_baseline():
 @app.local_entrypoint()
 def main_snapkv():
     for dataset in DATASETS:
-        run_inference.remote("snapkv", dataset)
+        run_inference.remote("snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_snapkv_static():
+    for dataset in DATASETS:
+        run_inference.remote("snapkv_static", dataset)
 
 @app.local_entrypoint()
 def main_quest():
     for dataset in DATASETS:
-        run_inference.remote("quest", dataset)
+        run_inference.remote("quest_static", dataset)
+
+@app.local_entrypoint()
+def main_quest_static():
+    for dataset in DATASETS:
+        run_inference.remote("quest_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_static", dataset)
+        run_inference.remote("pagekv_quest_bounds_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_static", dataset)
+        run_inference.remote("pagekv_quest_bounds_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds_static():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_static", dataset)
+        run_inference.remote("pagekv_quest_bounds_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_snapkv_static", dataset)
+        run_inference.remote("pagekv_snapkv_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv_static():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_snapkv_static", dataset)
+        run_inference.remote("pagekv_snapkv_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_h2o_static", dataset)
+        run_inference.remote("pagekv_h2o_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o_static():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_h2o_static", dataset)
+        run_inference.remote("pagekv_h2o_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_recon():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_recon_static", dataset)
+        run_inference.remote("pagekv_recon_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_recon_static():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_recon_static", dataset)
+        run_inference.remote("pagekv_recon_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_expected_attention_static():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_expected_attention_static", dataset)
+        run_inference.remote("pagekv_expected_attention_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_random():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_random_static", dataset)
+        run_inference.remote("pagekv_random_static", dataset)
 
 @app.local_entrypoint()
 def main_clusterkv_random_static():
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_random_static", dataset)
+        run_inference.remote("pagekv_random_static", dataset)
+
+@app.local_entrypoint()
+def main_pagekv_quest_bounds_static():
+    for dataset in DATASETS:
+        run_inference.remote("pagekv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_pagekv_snapkv_static():
+    for dataset in DATASETS:
+        run_inference.remote("pagekv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_pagekv_h2o_static():
+    for dataset in DATASETS:
+        run_inference.remote("pagekv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_pagekv_recon_static():
+    for dataset in DATASETS:
+        run_inference.remote("pagekv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_pagekv_expected_attention_static():
+    for dataset in DATASETS:
+        run_inference.remote("pagekv_expected_attention_static", dataset)
+
+@app.local_entrypoint()
+def main_pagekv_random_static():
+    for dataset in DATASETS:
+        run_inference.remote("pagekv_random_static", dataset)
+
+@app.local_entrypoint()
+def main_tokenkv_quest_bounds_static():
+    for dataset in DATASETS:
+        run_inference.remote("tokenkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_tokenkv_snapkv_static():
+    for dataset in DATASETS:
+        run_inference.remote("tokenkv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_tokenkv_h2o_static():
+    for dataset in DATASETS:
+        run_inference.remote("tokenkv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_tokenkv_recon_static():
+    for dataset in DATASETS:
+        run_inference.remote("tokenkv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_tokenkv_expected_attention_static():
+    for dataset in DATASETS:
+        run_inference.remote("tokenkv_expected_attention_static", dataset)
+
+@app.local_entrypoint()
+def main_tokenkv_random_static():
+    for dataset in DATASETS:
+        run_inference.remote("tokenkv_random_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_baseline():
@@ -446,74 +582,149 @@ def main_eval_baseline():
 @app.local_entrypoint()
 def main_eval_snapkv():
     for dataset in DATASETS:
-        run_eval.remote("snapkv", dataset)
+        run_eval.remote("snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_snapkv_static():
+    for dataset in DATASETS:
+        run_eval.remote("snapkv_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_quest():
     for dataset in DATASETS:
-        run_eval.remote("quest", dataset)
+        run_eval.remote("quest_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_quest_static():
+    for dataset in DATASETS:
+        run_eval.remote("quest_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_static", dataset)
+        run_eval.remote("pagekv_quest_bounds_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_static", dataset)
+        run_eval.remote("pagekv_quest_bounds_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds_static():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_static", dataset)
+        run_eval.remote("pagekv_quest_bounds_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_snapkv_static", dataset)
+        run_eval.remote("pagekv_snapkv_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv_static():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_snapkv_static", dataset)
+        run_eval.remote("pagekv_snapkv_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_h2o_static", dataset)
+        run_eval.remote("pagekv_h2o_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o_static():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_h2o_static", dataset)
+        run_eval.remote("pagekv_h2o_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_recon_static", dataset)
+        run_eval.remote("pagekv_recon_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon_static():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_recon_static", dataset)
+        run_eval.remote("pagekv_recon_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_expected_attention_static():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_expected_attention_static", dataset)
+        run_eval.remote("pagekv_expected_attention_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_random_static", dataset)
+        run_eval.remote("pagekv_random_static", dataset)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random_static():
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_random_static", dataset)
+        run_eval.remote("pagekv_random_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_pagekv_quest_bounds_static():
+    for dataset in DATASETS:
+        run_eval.remote("pagekv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_pagekv_snapkv_static():
+    for dataset in DATASETS:
+        run_eval.remote("pagekv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_pagekv_h2o_static():
+    for dataset in DATASETS:
+        run_eval.remote("pagekv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_pagekv_recon_static():
+    for dataset in DATASETS:
+        run_eval.remote("pagekv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_pagekv_expected_attention_static():
+    for dataset in DATASETS:
+        run_eval.remote("pagekv_expected_attention_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_pagekv_random_static():
+    for dataset in DATASETS:
+        run_eval.remote("pagekv_random_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_tokenkv_quest_bounds_static():
+    for dataset in DATASETS:
+        run_eval.remote("tokenkv_quest_bounds_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_tokenkv_snapkv_static():
+    for dataset in DATASETS:
+        run_eval.remote("tokenkv_snapkv_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_tokenkv_h2o_static():
+    for dataset in DATASETS:
+        run_eval.remote("tokenkv_h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_tokenkv_recon_static():
+    for dataset in DATASETS:
+        run_eval.remote("tokenkv_recon_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_tokenkv_expected_attention_static():
+    for dataset in DATASETS:
+        run_eval.remote("tokenkv_expected_attention_static", dataset)
+
+@app.local_entrypoint()
+def main_eval_tokenkv_random_static():
+    for dataset in DATASETS:
+        run_eval.remote("tokenkv_random_static", dataset)
 
 @app.local_entrypoint()
 def main_h2o():
     for dataset in DATASETS:
-        run_inference.remote("h2o", dataset)
+        run_inference.remote("h2o_static", dataset)
+
+@app.local_entrypoint()
+def main_h2o_static():
+    for dataset in DATASETS:
+        run_inference.remote("h2o_static", dataset)

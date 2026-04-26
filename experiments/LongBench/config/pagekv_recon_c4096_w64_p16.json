@@ -1,0 +1,11 @@
+{
+  "window_size": 64,
+  "max_capacity_prompt": 4096,
+  "page_size": 16,
+  "update_policy": "incremental",
+  "update_interval": 100,
+  "n_clusters": 128,
+  "ranking_backend": "reconstruction_error",
+  "observation_window": 32,
+  "selection_granularity": "page"
+}
