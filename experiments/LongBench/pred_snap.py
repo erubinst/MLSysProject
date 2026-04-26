@@ -7,7 +7,17 @@ import numpy as np
 import random
 import argparse
 import torch
-from snapkv.monkeypatch.monkeypatch import replace_llama, replace_mistral, replace_mixtral
+from snapkv.monkeypatch.monkeypatch import (
+    replace_llama,
+    replace_mistral,
+    replace_mixtral,
+    replace_llama_quest,
+    replace_mistral_quest,
+    replace_mixtral_quest,
+    replace_llama_cluster,
+    replace_mistral_cluster,
+    replace_mixtral_cluster,
+)
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -16,6 +26,8 @@ def parse_args(args=None):
         "internlm-7b-8k", "chatglm2-6b", "chatglm2-6b-32k", "chatglm3-6b-32k", "vicuna-v1.5-7b-16k",
         "mistral-7B-instruct-v0.2", "mistral-7B-instruct-v0.1", "llama-2-7B-32k-instruct", "mixtral-8x7B-instruct-v0.1","lwm-text-chat-1m", "lwm-text-1m"])
     parser.add_argument('--compress_args_path', type=str, default=None, help="Path to the compress args")
+    parser.add_argument('--method', type=str, default='snapkv', choices=['snapkv', 'quest', 'clusterkv'],
+                        help="Compression method to enable when --compress_args_path is provided")
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('--dataset', type=str, default='qasper', help="Dataset to evaluate on")
     return parser.parse_args(args)
@@ -57,10 +69,17 @@ def get_pred_single_gpu(data, max_length, max_gen,
                         prompt_format, dataset, model_name,
                         model2path, out_path,
                         compress=False,
+                        method='snapkv',
                         window_sizes=None,
                         max_capacity_prompts=None,
                         kernel_sizes=None,
-                        pooling=None):
+                        pooling=None,
+                        window_size=None,
+                        max_capacity_prompt=None,
+                        page_size=None,
+                        update_policy=None,
+                        update_interval=None,
+                        n_clusters=None):
     model, tokenizer = load_model_and_tokenizer(model2path[model_name], model_name, device="cuda", compress=compress)
     device = model.device
 
@@ -76,17 +95,29 @@ def get_pred_single_gpu(data, max_length, max_gen,
     for json_obj in tqdm(data):
         if compress:
             layers = len(model.model.layers)
-            if not isinstance(window_sizes, list):
-                window_sizes = [window_sizes] * layers
-            if not isinstance(max_capacity_prompts, list):
-                max_capacity_prompts = [max_capacity_prompts] * layers
-            if not isinstance(kernel_sizes, list):
-                kernel_sizes = [kernel_sizes] * layers
-            for i in range(layers):
-                model.model.layers[i].self_attn.config.window_size = window_sizes[i]
-                model.model.layers[i].self_attn.config.max_capacity_prompt = max_capacity_prompts[i]
-                model.model.layers[i].self_attn.config.kernel_size = kernel_sizes[i]
-                model.model.layers[i].self_attn.config.pooling = pooling
+            if method == 'snapkv':
+                if not isinstance(window_sizes, list):
+                    window_sizes = [window_sizes] * layers
+                if not isinstance(max_capacity_prompts, list):
+                    max_capacity_prompts = [max_capacity_prompts] * layers
+                if not isinstance(kernel_sizes, list):
+                    kernel_sizes = [kernel_sizes] * layers
+                for i in range(layers):
+                    model.model.layers[i].self_attn.config.window_size = window_sizes[i]
+                    model.model.layers[i].self_attn.config.max_capacity_prompt = max_capacity_prompts[i]
+                    model.model.layers[i].self_attn.config.kernel_size = kernel_sizes[i]
+                    model.model.layers[i].self_attn.config.pooling = pooling
+            elif method in ('quest', 'clusterkv'):
+                for i in range(layers):
+                    cfg = model.model.layers[i].self_attn.config
+                    cfg.window_size = window_size
+                    cfg.max_capacity_prompt = max_capacity_prompt
+                    cfg.page_size = page_size
+                    cfg.update_policy = update_policy
+                    cfg.update_interval = update_interval
+                    cfg.n_clusters = n_clusters
+            else:
+                raise ValueError(f"Compression method {method} not supported")
 
         prompt = prompt_format.format(**json_obj)
         tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt").input_ids[0]
@@ -143,7 +174,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
     max_ctx = max(context_lengths) if context_lengths else 0
 
     print(f"\n{'='*50}")
-    print(f"=== MEMORY SUMMARY ({'SnapKV compressed' if compress else 'Full precision'}) ===")
+    print(f"=== MEMORY SUMMARY ({method if compress else 'full'}) ===")
     print(f"Peak GPU memory allocated:    {peak_mb:.1f} MB  ({peak_gb:.2f} GB)")
     print(f"Current GPU memory allocated: {current_mb:.1f} MB")
     print(f"Memory for KV cache (approx): {peak_mb - memory_after_load_mb:.1f} MB")
@@ -226,9 +257,20 @@ if __name__ == '__main__':
         compress_args = json.load(open(os.path.join('config', args.compress_args_path), "r"))
         compress = True
         write_model_name = model_name + args.compress_args_path.split(".")[0]
-        replace_llama()
-        replace_mistral()
-        replace_mixtral()
+        if args.method == 'snapkv':
+            replace_llama()
+            replace_mistral()
+            replace_mixtral()
+        elif args.method == 'quest':
+            replace_llama_quest()
+            replace_mistral_quest()
+            replace_mixtral_quest()
+        elif args.method == 'clusterkv':
+            replace_llama_cluster()
+            replace_mistral_cluster()
+            replace_mixtral_cluster()
+        else:
+            raise ValueError(f"Compression method {args.method} not supported")
     else:
         compress = False
         compress_args = None
@@ -250,6 +292,12 @@ if __name__ == '__main__':
     data_all = [data_sample for data_sample in data]
 
     if compress_args is not None:
-        get_pred_single_gpu(data_all, max_length, max_gen, prompt_format, dataset, model_name, model2path, out_path, compress, **compress_args)
+        get_pred_single_gpu(
+            data_all, max_length, max_gen, prompt_format, dataset, model_name,
+            model2path, out_path, compress, args.method, **compress_args
+        )
     else:
-        get_pred_single_gpu(data_all, max_length, max_gen, prompt_format, dataset, model_name, model2path, out_path, compress)
+        get_pred_single_gpu(
+            data_all, max_length, max_gen, prompt_format, dataset, model_name,
+            model2path, out_path, compress, args.method
+        )

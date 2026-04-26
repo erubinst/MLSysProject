@@ -41,6 +41,22 @@ METHODS = {
         "extra_args": ["--compress_args_path", "ablation_c4096_w32_k7_maxpool.json"],
         "model_name": "mistral-7B-instruct-v0.2ablation_c4096_w32_k7_maxpool",
     },
+    "quest": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "quest",
+            "--compress_args_path", "quest_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2quest_c4096_w64_p16",
+    },
+    "clusterkv": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterkv_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterkv_c4096_w64_p16",
+    },
     "h2o": {
         "script": "pred_h2o.py",
         "extra_args": ["--max_capacity_prompt", "2048", "--window_size", "32"],
@@ -60,7 +76,7 @@ METHODS = {
     timeout=7200
 )
 def run_inference(method: str, dataset: str):
-    import subprocess, shutil, os
+    import subprocess, shutil, os, re, json
 
     cfg = METHODS[method]
     cmd = [
@@ -90,6 +106,26 @@ def run_inference(method: str, dataset: str):
         if os.path.exists(src):
             shutil.copytree(src, f"{pred_dir}/{d}", dirs_exist_ok=True)
             print(f"Saved {src} to {pred_dir}/{d}")
+
+    peak_match = re.search(r"Peak GPU memory allocated:\s+([0-9.]+)\s+MB\s+\(([0-9.]+)\s+GB\)", result.stdout)
+    kv_match = re.search(r"Memory for KV cache \(approx\):\s+([0-9.]+)\s+MB", result.stdout)
+
+    peak_gb = float(peak_match.group(2)) if peak_match else None
+    kv_cache_mb = float(kv_match.group(1)) if kv_match else None
+
+    os.makedirs("/models/results", exist_ok=True)
+    memory_result_path = f"/models/results/{method}_{dataset}_memory.json"
+    with open(memory_result_path, "w") as f:
+        json.dump(
+            {
+                "method": method,
+                "dataset": dataset,
+                "peak_gb": peak_gb,
+                "kv_cache_mb": kv_cache_mb,
+            },
+            f,
+        )
+    print(f"Saved memory stats to {memory_result_path}")
 
 
 # ============================================================
@@ -165,12 +201,7 @@ def generate_csv():
 
     # Collect all result files
     rows = {}  # {method: {dataset: score}}
-    memory = {
-        "baseline": {"peak_gb": 23.20, "kv_cache_mb": 9429},
-        "snapkv":   {"peak_gb": 20.89, "kv_cache_mb": 7072},
-        "h2o":      {"peak_gb": 19.53, "kv_cache_mb": 5672},
-        "ack":      {"peak_gb": None,  "kv_cache_mb": None},
-    }
+    memory = {}
 
     for fname in os.listdir(results_dir):
         if not fname.endswith(".json"):
@@ -179,10 +210,20 @@ def generate_csv():
             data = json.load(f)
         method = data["method"]
         dataset = data["dataset"]
-        score = data["score"]
-        if method not in rows:
-            rows[method] = {}
-        rows[method][dataset] = score
+
+        if "score" in data:
+            score = data["score"]
+            if method not in rows:
+                rows[method] = {}
+            rows[method][dataset] = score
+
+        if "peak_gb" in data or "kv_cache_mb" in data:
+            if method not in memory:
+                memory[method] = {}
+            memory[method][dataset] = {
+                "peak_gb": data.get("peak_gb"),
+                "kv_cache_mb": data.get("kv_cache_mb"),
+            }
 
     if not rows:
         print("No results found yet.")
@@ -196,19 +237,29 @@ def generate_csv():
     # Header
     writer.writerow(["Method"] + all_datasets + ["Average", "Peak GPU (GB)", "KV Cache (MB)"])
 
-    for method in ["baseline", "snapkv", "h2o", "ack"]:
+    for method in ["baseline", "snapkv", "quest", "clusterkv", "h2o", "ack"]:
         if method not in rows:
             continue
         scores = [rows[method].get(d) for d in all_datasets]
         valid_scores = [s for s in scores if s is not None]
         avg = round(sum(valid_scores) / len(valid_scores), 2) if valid_scores else None
-        mem = memory.get(method, {})
+        method_memory = memory.get(method, {})
+        peak_values = [
+            method_memory[d]["peak_gb"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("peak_gb") is not None
+        ]
+        kv_values = [
+            method_memory[d]["kv_cache_mb"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("kv_cache_mb") is not None
+        ]
+        peak_gb = round(max(peak_values), 2) if peak_values else ""
+        kv_cache_mb = round(max(kv_values), 1) if kv_values else ""
         row = (
             [method]
             + [round(s, 2) if s is not None else "" for s in scores]
             + [avg if avg is not None else ""]
-            + [mem.get("peak_gb") or ""]
-            + [mem.get("kv_cache_mb") or ""]
+            + [peak_gb]
+            + [kv_cache_mb]
         )
         writer.writerow(row)
 
@@ -232,7 +283,7 @@ def generate_csv():
 @app.local_entrypoint()
 def main():
     """Run inference for all methods and datasets, then eval and generate CSV."""
-    methods_to_run = ["baseline", "snapkv", "h2o"]
+    methods_to_run = ["baseline", "snapkv", "quest"]
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"\nSubmitting {method} / {dataset}...")
@@ -242,7 +293,7 @@ def main():
 @app.local_entrypoint()
 def main_eval_all():
     """Score all completed inference runs and generate CSV."""
-    methods_to_run = ["baseline", "snapkv", "h2o"]
+    methods_to_run = ["baseline", "snapkv", "quest"]
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"Evaluating {method} / {dataset}...")
@@ -281,6 +332,36 @@ def main_baseline():
 def main_snapkv():
     for dataset in DATASETS:
         run_inference.remote("snapkv", dataset)
+
+@app.local_entrypoint()
+def main_quest():
+    for dataset in DATASETS:
+        run_inference.remote("quest", dataset)
+
+@app.local_entrypoint()
+def main_clusterkv():
+    for dataset in DATASETS:
+        run_inference.remote("clusterkv", dataset)
+
+@app.local_entrypoint()
+def main_eval_baseline():
+    for dataset in DATASETS:
+        run_eval.remote("baseline", dataset)
+
+@app.local_entrypoint()
+def main_eval_snapkv():
+    for dataset in DATASETS:
+        run_eval.remote("snapkv", dataset)
+
+@app.local_entrypoint()
+def main_eval_quest():
+    for dataset in DATASETS:
+        run_eval.remote("quest", dataset)
+
+@app.local_entrypoint()
+def main_eval_clusterkv():
+    for dataset in DATASETS:
+        run_eval.remote("clusterkv", dataset)
 
 @app.local_entrypoint()
 def main_h2o():
