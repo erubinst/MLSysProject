@@ -711,6 +711,36 @@ def generate_csv(run_tag: str):
     return csv_content
 
 
+@app.function(
+    image=image,
+    volumes={"/models": volume},
+    timeout=120
+)
+def verify_eval_complete(run_tag: str, methods: list[str] | None = None):
+    import os
+
+    methods_to_check = methods or STATIC_METHODS
+    results_dir = _results_dir(run_tag)
+    missing = []
+
+    for method in methods_to_check:
+        for dataset in DATASETS:
+            path = os.path.join(results_dir, f"{method}_{dataset}.json")
+            if not os.path.exists(path):
+                missing.append((method, dataset))
+
+    if missing:
+        print(f"Eval incomplete for run {run_tag}. Missing {len(missing)} result files.")
+        for method, dataset in missing[:20]:
+            print(f"- missing: {method} / {dataset}")
+        if len(missing) > 20:
+            print(f"... and {len(missing) - 20} more")
+        return False
+
+    print(f"EVAL PASSED for run {run_tag}")
+    return True
+
+
 # ============================================================
 # Entrypoints
 # ============================================================
@@ -720,27 +750,35 @@ def main(version: str = "1", run_tag: str = ""):
     """Run inference for all methods and datasets, then eval and generate CSV."""
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    methods_to_run = ["baseline", "snapkv_static", "quest_static"]
+    methods_to_run = STATIC_METHODS
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"\nSubmitting {method} / {dataset}...")
             run_inference.remote(method, dataset, resolved_run_tag)
+    print(f"Submitted inference jobs for {len(methods_to_run)} methods across {len(DATASETS)} datasets.")
 
 
 @app.local_entrypoint()
 def main_eval_all(run_tag: str):
     """Score all completed inference runs and generate CSV."""
-    methods_to_run = ["baseline", "snapkv_static", "quest_static"]
+    methods_to_run = STATIC_METHODS
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"Evaluating {method} / {dataset}...")
             run_eval.remote(method, dataset, run_tag)
+    print(f"Submitted eval jobs for {len(methods_to_run)} methods across {len(DATASETS)} datasets.")
 
 
 @app.local_entrypoint()
 def main_csv(run_tag: str):
     """Generate results CSV from saved eval results."""
     generate_csv.remote(run_tag)
+
+
+@app.local_entrypoint()
+def main_verify_eval(run_tag: str):
+    """Check whether all static-method eval artifacts exist for the given run."""
+    verify_eval_complete.remote(run_tag)
 
 @app.local_entrypoint()
 def main_validate_all_static(version: str = "1", run_tag: str = ""):

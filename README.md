@@ -85,6 +85,16 @@ modal run --detach test.py::main_eval_pagekv_expected_attention_static --run-tag
 modal run --detach test.py::main_csv --run-tag v3_20260426_153012
 ```
 
+To evaluate the full static method matrix for a run:
+
+```bash
+modal run --detach test.py::main_eval_all --run-tag v3_20260426_153012
+modal run --detach test.py::main_verify_eval --run-tag v3_20260426_153012
+modal run --detach test.py::main_csv --run-tag v3_20260426_153012
+```
+
+`main_verify_eval` prints `EVAL PASSED` once every expected eval artifact exists for the run.
+
 You can also set the tag directly:
 
 ```bash
