@@ -40,6 +40,53 @@ modal setup
 
 If model download requires authentication, create a Modal secret named `huggingface` with your Hugging Face token.
 
+## Full Benchmark Flow
+This is the end-to-end workflow for running the full static experiment matrix, then evaluating and summarizing it.
+These top-level commands submit one remote orchestrator each, so `--detach` is safe to use for the full batch flow.
+
+1. Submit all inference jobs:
+
+```bash
+cd /home/uhdfhnn/Desktop/MLSysProject
+modal run --detach test.py::main --version 1
+```
+
+2. Note the printed run tag, for example:
+
+```text
+v1_20260427_103000
+```
+
+3. After inference finishes, submit evaluation for that same run:
+
+```bash
+modal run --detach test.py::main_eval_all --run-tag v1_20260427_103000
+```
+
+4. Verify the run is complete:
+
+```bash
+modal run --detach test.py::main_verify_eval --run-tag v1_20260427_103000
+```
+
+5. Generate the CSV summary:
+
+```bash
+modal run --detach test.py::main_csv --run-tag v1_20260427_103000
+```
+
+What each command does:
+- `main`: submits all static-method inference jobs across all datasets
+- `main_eval_all`: scores all method/dataset predictions for that run
+- `main_verify_eval`: checks that eval files exist and required metrics were logged
+- `main_csv`: writes the summary CSV for that run
+
+For a fast sanity check before the full benchmark:
+
+```bash
+modal run --detach test.py::main_validate_all_static --version 1
+```
+
 ## Running Without Keeping The CLI Open
 Use `modal run --detach ...` to submit jobs and return immediately:
 
@@ -48,6 +95,11 @@ modal run --detach test.py::main_pagekv_expected_attention_static --version 3
 ```
 
 This is the recommended way to submit longer inference or evaluation jobs.
+
+## Run
+| Owner | Version | Scope | Run Tag | Link |
+| --- | --- | --- | --- | --- |
+| Michael | `1` | all static methods | `v1_20260427_030527` | [ap-7D5pMzxNUjZkXQWrnUoZpS](https://modal.com/apps/huxinyu1997/main/ap-7D5pMzxNUjZkXQWrnUoZpS) |
 
 ## Versioned Runs
 All Modal artifacts are now versioned.

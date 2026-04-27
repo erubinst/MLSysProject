@@ -613,6 +613,53 @@ def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset
     return validation
 
 
+@app.function(
+    image=image,
+    volumes={"/models": volume},
+    timeout=600
+)
+def submit_inference_batch(methods: list[str], run_tag: str):
+    submitted = 0
+    for method in methods:
+        for dataset in DATASETS:
+            print(f"Submitting {method} / {dataset}...")
+            run_inference.spawn(method, dataset, run_tag)
+            submitted += 1
+    print(f"Submitted {submitted} inference jobs for run {run_tag}.")
+    return submitted
+
+
+@app.function(
+    image=image,
+    volumes={"/models": volume},
+    timeout=600
+)
+def submit_eval_batch(methods: list[str], run_tag: str):
+    submitted = 0
+    for method in methods:
+        for dataset in DATASETS:
+            print(f"Evaluating {method} / {dataset}...")
+            run_eval.spawn(method, dataset, run_tag)
+            submitted += 1
+    print(f"Submitted {submitted} eval jobs for run {run_tag}.")
+    return submitted
+
+
+@app.function(
+    image=image,
+    volumes={"/models": volume},
+    timeout=600
+)
+def submit_validation_batch(methods: list[str], run_tag: str, dataset: str = VALIDATION_DATASET, sample_offset: int = VALIDATION_SAMPLE_OFFSET):
+    submitted = 0
+    for method in methods:
+        print(f"Validating {method} on {dataset} sample {sample_offset}...")
+        run_validation.spawn(method, dataset, sample_offset, run_tag)
+        submitted += 1
+    print(f"Submitted {submitted} validation jobs for run {run_tag}.")
+    return submitted
+
+
 # ============================================================
 # Eval
 # ============================================================
@@ -911,28 +958,39 @@ def verify_eval_complete(run_tag: str, methods: list[str] | None = None):
 # Entrypoints
 # ============================================================
 
-@app.local_entrypoint()
-def main(version: str = "1", run_tag: str = ""):
-    """Run inference for all methods and datasets, then eval and generate CSV."""
+def _submit_inference_methods(methods: list[str], version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    methods_to_run = STATIC_METHODS
-    for method in methods_to_run:
-        for dataset in DATASETS:
-            print(f"\nSubmitting {method} / {dataset}...")
-            run_inference.spawn(method, dataset, resolved_run_tag)
-    print(f"Submitted inference jobs for {len(methods_to_run)} methods across {len(DATASETS)} datasets.")
+    submit_inference_batch.spawn(methods, resolved_run_tag)
+    print(f"Submitted remote inference orchestrator for {len(methods)} method(s).")
+
+
+def _submit_eval_methods(methods: list[str], run_tag: str):
+    submit_eval_batch.spawn(methods, run_tag)
+    print(f"Submitted remote eval orchestrator for {len(methods)} method(s).")
+
+
+def _submit_validation_methods(methods: list[str], version: str = "1", run_tag: str = ""):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    submit_validation_batch.spawn(
+        methods,
+        resolved_run_tag,
+        VALIDATION_DATASET,
+        VALIDATION_SAMPLE_OFFSET,
+    )
+    print(f"Submitted remote validation orchestrator for {len(methods)} method(s).")
+
+@app.local_entrypoint()
+def main(version: str = "1", run_tag: str = ""):
+    """Run inference for all methods and datasets via a remote orchestrator."""
+    _submit_inference_methods(STATIC_METHODS, version, run_tag)
 
 
 @app.local_entrypoint()
 def main_eval_all(run_tag: str):
-    """Score all completed inference runs and generate CSV."""
-    methods_to_run = STATIC_METHODS
-    for method in methods_to_run:
-        for dataset in DATASETS:
-            print(f"Evaluating {method} / {dataset}...")
-            run_eval.spawn(method, dataset, run_tag)
-    print(f"Submitted eval jobs for {len(methods_to_run)} methods across {len(DATASETS)} datasets.")
+    """Score all completed inference runs via a remote orchestrator."""
+    _submit_eval_methods(STATIC_METHODS, run_tag)
 
 
 @app.local_entrypoint()
@@ -949,11 +1007,7 @@ def main_verify_eval(run_tag: str):
 @app.local_entrypoint()
 def main_validate_all_static(version: str = "1", run_tag: str = ""):
     """Run one-example validation for all current static methods."""
-    resolved_run_tag = _build_run_tag(version, run_tag)
-    print(f"Run tag: {resolved_run_tag}")
-    for method in STATIC_METHODS:
-        run_validation.spawn(method, VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
-    print(f"Submitted {len(STATIC_METHODS)} validation jobs (spawn).")
+    _submit_validation_methods(STATIC_METHODS, version, run_tag)
 
 @app.local_entrypoint()
 def main_validate_single(version: str = "1", run_tag: str = ""):
