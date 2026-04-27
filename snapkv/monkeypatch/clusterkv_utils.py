@@ -116,7 +116,8 @@ class ClusterKVCache:
         self.ranking_backend = ranking_backend
         self.observation_window = observation_window
         self.selection_granularity = selection_granularity
-        self.clustering_backend = clustering_backend
+        # Some configs may set clustering_backend=None; treat it as default.
+        self.clustering_backend = clustering_backend or "kmeanspp"
         self.num_block = num_block
         self.theta = theta
 
@@ -205,16 +206,25 @@ class ClusterKVCache:
         elif self.clustering_backend in ("kmeanspp", "spherical_kmeans"):
             first_idx = torch.randint(0, n_tokens, (1,), device=data.device)
             centroids[0] = work_data[first_idx]
-            closest_dist_sq = ((work_data - centroids[0:1]) ** 2).sum(dim=-1)
+            # Compute k-means++ distances in fp32 for numerical stability.
+            # In fp16, squared distances can overflow -> NaNs/Inf -> multinomial failures.
+            closest_dist_sq = ((work_data.float() - centroids[0:1].float()) ** 2).sum(dim=-1)
             for i in range(1, k):
                 total = closest_dist_sq.sum()
-                if total <= 0:
+                if (not torch.isfinite(total)) or total <= 0:
                     next_idx = torch.randint(0, n_tokens, (1,), device=data.device)
                 else:
                     probs = closest_dist_sq / total
-                    next_idx = torch.multinomial(probs, 1)
+                    probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+                    probs = probs.clamp_min_(0.0)
+                    s = probs.sum()
+                    if (not torch.isfinite(s)) or s <= 0:
+                        next_idx = torch.randint(0, n_tokens, (1,), device=data.device)
+                    else:
+                        probs = probs / s
+                        next_idx = torch.multinomial(probs, 1)
                 centroids[i] = work_data[next_idx]
-                new_dist_sq = ((work_data - centroids[i : i + 1]) ** 2).sum(dim=-1)
+                new_dist_sq = ((work_data.float() - centroids[i : i + 1].float()) ** 2).sum(dim=-1)
                 closest_dist_sq = torch.minimum(closest_dist_sq, new_dist_sq)
         else:
             raise ValueError(f"Unsupported clustering backend: {self.clustering_backend}")
@@ -740,7 +750,7 @@ def init_clusterkv(self):
             self.config.observation_window = 32
         if not hasattr(self.config, 'selection_granularity'):
             self.config.selection_granularity = 'cluster'
-        if not hasattr(self.config, 'clustering_backend'):
+        if (not hasattr(self.config, 'clustering_backend')) or (getattr(self.config, "clustering_backend") is None):
             self.config.clustering_backend = 'kmeanspp'
         if not hasattr(self.config, 'num_block'):
             self.config.num_block = 12
