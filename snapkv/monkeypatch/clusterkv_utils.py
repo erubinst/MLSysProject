@@ -456,22 +456,24 @@ class ClusterKVCache:
                 prefix_values.gather(dim=2, index=gather_index),
             )
 
-        # Neighborhood radius r in block units (token_budget translated to ~blocks)
+        # Neighborhood radius r in block units (token_budget translated to ~blocks).
+        # Use a per-(batch, head) loop to avoid ragged tensor issues.
         budget_blocks = max(1, int(math.ceil(token_budget / float(blksize))))
-        r = torch.clamp((budget_blocks / (2.0 * centers_count.float())).floor().to(torch.long), min=0)
+        r = torch.clamp((budget_blocks / (2.0 * centers_count.float())).floor().to(torch.long), min=0)  # [bsz, heads]
 
-        block_ids = torch.arange(nblocks, device=prefix_keys.device).view(1, 1, -1).expand(bsz, num_heads, -1)
-        max_r = int(r.max().item())
-        if max_r == 0:
-            cand_blocks = centers_mask
-        else:
-            offsets = torch.arange(-max_r, max_r + 1, device=prefix_keys.device, dtype=torch.long)
-            expanded = (block_ids.unsqueeze(-1) + offsets.view(1, 1, 1, -1)).clamp_(0, nblocks - 1)
-            within = offsets.abs().view(1, 1, 1, -1) <= r.view(bsz, num_heads, 1, 1)
-            active = centers_mask.unsqueeze(-1) & within
-
-            cand_blocks = torch.zeros((bsz, num_heads, nblocks), device=prefix_keys.device, dtype=torch.bool)
-            cand_blocks.scatter_(2, expanded[active].view(bsz, num_heads, -1), True)
+        cand_blocks = torch.zeros((bsz, num_heads, nblocks), device=prefix_keys.device, dtype=torch.bool)
+        for b in range(bsz):
+            for h in range(num_heads):
+                centers = torch.nonzero(centers_mask[b, h], as_tuple=False).squeeze(-1)
+                if centers.numel() == 0:
+                    continue
+                r_bh = int(r[b, h].item())
+                if r_bh == 0:
+                    cand_blocks[b, h, centers] = True
+                    continue
+                offsets = torch.arange(-r_bh, r_bh + 1, device=prefix_keys.device, dtype=torch.long)
+                expanded = (centers.unsqueeze(-1) + offsets.view(1, -1)).clamp_(0, nblocks - 1).reshape(-1)
+                cand_blocks[b, h, expanded.unique()] = True
 
         tok_ids = torch.arange(prefix_len, device=prefix_keys.device).view(1, 1, -1).expand(bsz, num_heads, -1)
         tok_block = (tok_ids // blksize).clamp_max(nblocks - 1)
