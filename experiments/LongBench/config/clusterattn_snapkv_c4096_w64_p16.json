@@ -1,0 +1,14 @@
+{
+  "window_size": 64,
+  "max_capacity_prompt": 4096,
+  "page_size": 16,
+  "update_policy": "static",
+  "update_interval": 100,
+  "n_clusters": 128,
+  "ranking_backend": "snapkv_prefill",
+  "observation_window": 32,
+  "selection_granularity": "clusterattn",
+  "clustering_backend": "kmeanspp",
+  "num_block": 12,
+  "theta": 0.0005
+}

@@ -418,11 +418,12 @@ class ClusterKVCache:
         self,
         prefix_keys: torch.Tensor,
         prefix_values: torch.Tensor,
+        current_query: torch.Tensor,
         query_states: torch.Tensor,
     ):
         """
         ClusterAttn (Algorithm 1) inspired selection on *token indices*:
-        - build token importance P from an observation window (tail-sampled prompt queries)
+        - build token importance P using the configured token ranking backend
         - aggregate to block scores P' via maxpool with stride=blksize
         - filter blocks by theta to get centers
         - expand centers by radius r in block units to get candidate blocks
@@ -437,10 +438,8 @@ class ClusterKVCache:
         if token_budget == 0:
             return prefix_keys[:, :, :0, :], prefix_values[:, :, :0, :]
 
-        # P: per-token importance from observation window (same spirit as paper)
-        sampled_queries = self._sample_queries(query_states, mode="tail")
-        attn_logits = torch.einsum("bhqd,bhkd->bhqk", sampled_queries, prefix_keys) / math.sqrt(head_dim)
-        token_scores = torch.softmax(attn_logits, dim=-1).mean(dim=2)  # [bsz, heads, prefix_len]
+        # P: per-token importance from the configured backend.
+        token_scores = self._score_tokens(prefix_keys, current_query, query_states)  # [bsz, heads, prefix_len]
 
         # Block maxpool -> P' (block scores)
         num_block = int(max(1, self.num_block))
@@ -718,7 +717,7 @@ class ClusterKVCache:
             elif self.selection_granularity == 'cluster':
                 k_past_compress, v_past_compress = self._select_topk_clusters(k_past, v_past, current_queries, query_states)
             elif self.selection_granularity == 'clusterattn':
-                k_past_compress, v_past_compress = self._select_clusterattn_density(k_past, v_past, query_states)
+                k_past_compress, v_past_compress = self._select_clusterattn_density(k_past, v_past, current_queries, query_states)
             else:
                 raise ValueError(f"Unsupported selection granularity: {self.selection_granularity}")
 

@@ -123,6 +123,8 @@ modal run --detach test.py::main_validate_all_static --version 4
 Cluster-specific examples:
 
 ```bash
+modal run --detach test.py::main_validate_clusterattn_static --version 4
+modal run --detach test.py::main_validate_clusterattn_h2o_static --version 4
 modal run --detach test.py::main_validate_clusterkv_quest_bounds_static --version 4
 modal run --detach test.py::main_validate_clusterkv_quest_bounds_kmeans_static --version 4
 modal run --detach test.py::main_validate_clusterkv_expected_attention_spherical_static --version 4
@@ -213,7 +215,17 @@ Status: `done`
 - `baseline`
 - `snapkv_static`
 - `quest_static`
+- `clusterattn_static`
 - `h2o_static`
+
+### ClusterAttn static methods
+- `clusterattn_static` (alias to the SnapKV-scored ClusterAttn preset)
+- `clusterattn_quest_bounds_static`
+- `clusterattn_snapkv_static`
+- `clusterattn_h2o_static`
+- `clusterattn_recon_static`
+- `clusterattn_expected_attention_static`
+- `clusterattn_random_static`
 
 ### Cluster-level static methods
 - `clusterkv_quest_bounds_static` (`kmeanspp` default)
@@ -271,6 +283,21 @@ The naming convention is:
 ### `quest_static`
 - separate page-level retrieval path inspired by Quest
 - static prompt-time approximation
+
+### `clusterattn_static`
+- separate static block-density retrieval path
+- uses prompt attention to score tokens, max-pools into blocks, thresholds block centers, expands neighborhoods, then keeps top tokens
+- not semantic k-means clustering; this is a ClusterAttention-style baseline
+
+### `clusterattn_*_static`
+- same ClusterAttn block-density retrieval pipeline
+- swap only the token scoring backend:
+  - `quest_bounds`
+  - `snapkv_prefill`
+  - `h2o_accum`
+  - `reconstruction_error`
+  - `expected_attention`
+  - `random`
 
 ### `clusterkv_*_static`
 - real static cluster selection path

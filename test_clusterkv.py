@@ -227,10 +227,67 @@ def test_cluster_backends_smoke():
         assert value_out.shape == (1, 1, 4, 2)
     print("✓ Cluster backends executed successfully")
 
+def test_clusterattn_backends_smoke():
+    """ClusterAttn should accept all supported token scoring backends."""
+    print("\nTesting ClusterAttn backend smoke cases...")
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    dtype = torch.float32
+    torch.manual_seed(0)
+
+    key_states = torch.tensor(
+        [[[
+            [-3.0, 0.0],
+            [-2.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [4.0, 0.0],
+            [5.0, 0.0],
+        ]]],
+        device=device,
+        dtype=dtype,
+    )
+    value_states = key_states.clone()
+    query_states = torch.tensor(
+        [[[
+            [0.0, 0.0],
+            [0.0, 0.0],
+            [0.0, 0.0],
+            [0.5, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ]]],
+        device=device,
+        dtype=dtype,
+    )
+
+    for backend in [
+        "quest_bounds",
+        "snapkv_prefill",
+        "h2o_accum",
+        "reconstruction_error",
+        "expected_attention",
+        "random",
+    ]:
+        cache = ClusterKVCache(
+            n_clusters=2,
+            window_size=2,
+            max_capacity_prompt=4,
+            ranking_backend=backend,
+            selection_granularity="clusterattn",
+            num_block=2,
+            theta=0.0,
+        )
+        key_out, value_out = cache.update_kv(key_states, query_states, value_states)
+        assert key_out.shape == (1, 1, 4, 2)
+        assert value_out.shape == (1, 1, 4, 2)
+    print("✓ ClusterAttn backends executed successfully")
+
 if __name__ == "__main__":
     test_online_kmeans()
     test_cluster_kv_cache()
     test_page_level_retrieval()
     test_cluster_level_retrieval()
     test_cluster_backends_smoke()
+    test_clusterattn_backends_smoke()
     print("\nAll tests passed!")
