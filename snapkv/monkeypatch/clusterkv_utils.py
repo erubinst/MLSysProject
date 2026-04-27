@@ -89,7 +89,9 @@ class ClusterKVCache:
                  update_policy: str = 'incremental', update_interval: int = 100,
                  page_size: int = 16, ranking_backend: str = 'quest_bounds',
                  observation_window: int = 32, selection_granularity: str = 'page',
-                 clustering_backend: str = 'kmeanspp'):
+                 clustering_backend: str = 'kmeanspp',
+                 num_block: int = 12,
+                 theta: float = 0.0):
         """
         Args:
             n_clusters: Number of clusters for k-means
@@ -100,8 +102,10 @@ class ClusterKVCache:
             page_size: Number of KV tokens grouped into one retrieval page
             ranking_backend: Importance ranking backend for prefix pages
             observation_window: Number of prompt queries used by sampled attention backends
-            selection_granularity: 'page', 'token', or 'cluster'
+            selection_granularity: 'page', 'token', 'cluster', or 'clusterattn'
             clustering_backend: 'kmeans', 'kmeanspp', or 'spherical_kmeans'
+            num_block: ClusterAttn-style number of blocks for density selection
+            theta: ClusterAttn-style threshold for block centers
         """
         self.n_clusters = n_clusters
         self.window_size = window_size
@@ -113,6 +117,8 @@ class ClusterKVCache:
         self.observation_window = observation_window
         self.selection_granularity = selection_granularity
         self.clustering_backend = clustering_backend
+        self.num_block = num_block
+        self.theta = theta
 
         self.kmeans = None
         self.cluster_assignments = None
@@ -398,6 +404,96 @@ class ClusterKVCache:
         )
         return torch.exp(token_scores)
 
+    def _select_clusterattn_density(
+        self,
+        prefix_keys: torch.Tensor,
+        prefix_values: torch.Tensor,
+        query_states: torch.Tensor,
+    ):
+        """
+        ClusterAttn (Algorithm 1) inspired selection on *token indices*:
+        - build token importance P from an observation window (tail-sampled prompt queries)
+        - aggregate to block scores P' via maxpool with stride=blksize
+        - filter blocks by theta to get centers
+        - expand centers by radius r in block units to get candidate blocks
+        - select top token_budget tokens within candidate blocks, keep chronological order
+        """
+        bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
+        if prefix_len == 0:
+            return prefix_keys[:, :, :0, :], prefix_values[:, :, :0, :]
+
+        token_budget = max(self.max_capacity_prompt - self.window_size, 0)
+        token_budget = min(token_budget, prefix_len)
+        if token_budget == 0:
+            return prefix_keys[:, :, :0, :], prefix_values[:, :, :0, :]
+
+        # P: per-token importance from observation window (same spirit as paper)
+        sampled_queries = self._sample_queries(query_states, mode="tail")
+        attn_logits = torch.einsum("bhqd,bhkd->bhqk", sampled_queries, prefix_keys) / math.sqrt(head_dim)
+        token_scores = torch.softmax(attn_logits, dim=-1).mean(dim=2)  # [bsz, heads, prefix_len]
+
+        # Block maxpool -> P' (block scores)
+        num_block = int(max(1, self.num_block))
+        blksize = int(max(1, math.ceil(prefix_len / float(num_block))))
+        nblocks = int(math.ceil(prefix_len / float(blksize)))
+
+        x = token_scores.reshape(bsz * num_heads, 1, prefix_len)
+        pad = nblocks * blksize - prefix_len
+        if pad > 0:
+            x = torch.nn.functional.pad(x, (0, pad), value=torch.finfo(token_scores.dtype).min)
+        p_block = torch.nn.functional.max_pool1d(x, kernel_size=blksize, stride=blksize)
+        p_block = p_block.reshape(bsz, num_heads, nblocks)  # [bsz, heads, nblocks]
+
+        centers_mask = p_block >= float(self.theta)
+        centers_count = centers_mask.sum(dim=-1)  # [bsz, heads]
+
+        # If no centers found, fall back to vanilla top-k on tokens
+        if (centers_count == 0).any():
+            top_idx = token_scores.topk(token_budget, dim=-1).indices.sort(dim=-1).values
+            gather_index = top_idx.unsqueeze(-1).expand(-1, -1, -1, head_dim)
+            return (
+                prefix_keys.gather(dim=2, index=gather_index),
+                prefix_values.gather(dim=2, index=gather_index),
+            )
+
+        # Neighborhood radius r in block units (token_budget translated to ~blocks)
+        budget_blocks = max(1, int(math.ceil(token_budget / float(blksize))))
+        r = torch.clamp((budget_blocks / (2.0 * centers_count.float())).floor().to(torch.long), min=0)
+
+        block_ids = torch.arange(nblocks, device=prefix_keys.device).view(1, 1, -1).expand(bsz, num_heads, -1)
+        max_r = int(r.max().item())
+        if max_r == 0:
+            cand_blocks = centers_mask
+        else:
+            offsets = torch.arange(-max_r, max_r + 1, device=prefix_keys.device, dtype=torch.long)
+            expanded = (block_ids.unsqueeze(-1) + offsets.view(1, 1, 1, -1)).clamp_(0, nblocks - 1)
+            within = offsets.abs().view(1, 1, 1, -1) <= r.view(bsz, num_heads, 1, 1)
+            active = centers_mask.unsqueeze(-1) & within
+
+            cand_blocks = torch.zeros((bsz, num_heads, nblocks), device=prefix_keys.device, dtype=torch.bool)
+            cand_blocks.scatter_(2, expanded[active].view(bsz, num_heads, -1), True)
+
+        tok_ids = torch.arange(prefix_len, device=prefix_keys.device).view(1, 1, -1).expand(bsz, num_heads, -1)
+        tok_block = (tok_ids // blksize).clamp_max(nblocks - 1)
+        tok_mask = cand_blocks.gather(-1, tok_block)  # [bsz, heads, prefix_len]
+
+        neg_inf = torch.finfo(token_scores.dtype).min
+        masked_scores = token_scores.masked_fill(~tok_mask, neg_inf)
+        idx = masked_scores.topk(token_budget, dim=-1).indices
+        vals = masked_scores.gather(-1, idx)
+        need_fill = vals.eq(neg_inf)
+        if need_fill.any():
+            outside_scores = token_scores.masked_fill(tok_mask, neg_inf)
+            outside = outside_scores.topk(token_budget, dim=-1).indices
+            idx = torch.where(need_fill, outside, idx)
+
+        idx = idx.sort(dim=-1).values
+        gather_index = idx.unsqueeze(-1).expand(-1, -1, -1, head_dim)
+        return (
+            prefix_keys.gather(dim=2, index=gather_index),
+            prefix_values.gather(dim=2, index=gather_index),
+        )
+
     def _score_pages_random(self, prefix_keys: torch.Tensor):
         bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
         if prefix_len == 0:
@@ -591,7 +687,7 @@ class ClusterKVCache:
                   value_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None,
                   num_key_value_groups: int = 1):
         """
-        Update KV cache using page-level query-aware retrieval.
+        Update KV cache using query-aware retrieval.
         """
         bsz, num_heads, q_len, head_dim = query_states.shape
 
@@ -609,6 +705,8 @@ class ClusterKVCache:
                 k_past_compress, v_past_compress = self._select_topk_pages(k_past, v_past, current_queries, query_states)
             elif self.selection_granularity == 'cluster':
                 k_past_compress, v_past_compress = self._select_topk_clusters(k_past, v_past, current_queries, query_states)
+            elif self.selection_granularity == 'clusterattn':
+                k_past_compress, v_past_compress = self._select_clusterattn_density(k_past, v_past, query_states)
             else:
                 raise ValueError(f"Unsupported selection granularity: {self.selection_granularity}")
 
@@ -642,6 +740,10 @@ def init_clusterkv(self):
             self.config.selection_granularity = 'cluster'
         if not hasattr(self.config, 'clustering_backend'):
             self.config.clustering_backend = 'kmeanspp'
+        if not hasattr(self.config, 'num_block'):
+            self.config.num_block = 12
+        if not hasattr(self.config, 'theta'):
+            self.config.theta = 0.0
 
     self.kv_cluster = ClusterKVCache(
         n_clusters=self.config.n_clusters,
@@ -653,5 +755,7 @@ def init_clusterkv(self):
         ranking_backend=self.config.ranking_backend,
         observation_window=self.config.observation_window,
         selection_granularity=self.config.selection_granularity,
-        clustering_backend=self.config.clustering_backend
+        clustering_backend=self.config.clustering_backend,
+        num_block=self.config.num_block,
+        theta=self.config.theta,
     )
