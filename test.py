@@ -466,9 +466,23 @@ def run_inference(method: str, dataset: str, run_tag: str):
 
     peak_match = re.search(r"Peak GPU memory allocated:\s+([0-9.]+)\s+MB\s+\(([0-9.]+)\s+GB\)", result.stdout)
     kv_match = re.search(r"Memory for KV cache \(approx\):\s+([0-9.]+)\s+MB", result.stdout)
+    total_latency_match = re.search(r"Total latency:\s+([0-9.]+)\s+s", result.stdout)
+    avg_latency_match = re.search(r"Average latency / example:\s+([0-9.]+)\s+s", result.stdout)
+    max_latency_match = re.search(r"Max latency / example:\s+([0-9.]+)\s+s", result.stdout)
+    throughput_match = re.search(r"Generation throughput:\s+([0-9.]+)\s+tok/s", result.stdout)
+    profiled_flops_match = re.search(r"Profiled FLOPs \(1st example\):\s+([0-9.]+)", result.stdout)
+    profiled_tflops_match = re.search(r"Profiled TFLOPs \(1st example\):\s+([0-9.]+)", result.stdout)
+    profiled_tflops_per_s_match = re.search(r"Profiled TFLOPs/s \(1st example\):\s+([0-9.]+)", result.stdout)
 
     peak_gb = float(peak_match.group(2)) if peak_match else None
     kv_cache_mb = float(kv_match.group(1)) if kv_match else None
+    total_latency_s = float(total_latency_match.group(1)) if total_latency_match else None
+    avg_latency_s = float(avg_latency_match.group(1)) if avg_latency_match else None
+    max_latency_s = float(max_latency_match.group(1)) if max_latency_match else None
+    tokens_per_second = float(throughput_match.group(1)) if throughput_match else None
+    profiled_flops = float(profiled_flops_match.group(1)) if profiled_flops_match else None
+    profiled_tflops = float(profiled_tflops_match.group(1)) if profiled_tflops_match else None
+    profiled_tflops_per_s = float(profiled_tflops_per_s_match.group(1)) if profiled_tflops_per_s_match else None
 
     os.makedirs(_results_dir(run_tag), exist_ok=True)
     memory_result_path = f"{_results_dir(run_tag)}/{method}_{dataset}_memory.json"
@@ -480,6 +494,13 @@ def run_inference(method: str, dataset: str, run_tag: str):
                 "dataset": dataset,
                 "peak_gb": peak_gb,
                 "kv_cache_mb": kv_cache_mb,
+                "total_latency_s": total_latency_s,
+                "avg_latency_s": avg_latency_s,
+                "max_latency_s": max_latency_s,
+                "tokens_per_second": tokens_per_second,
+                "profiled_flops": profiled_flops,
+                "profiled_tflops": profiled_tflops,
+                "profiled_tflops_per_s": profiled_tflops_per_s,
             },
             f,
         )
@@ -685,6 +706,13 @@ def generate_csv(run_tag: str):
             memory[method][dataset] = {
                 "peak_gb": data.get("peak_gb"),
                 "kv_cache_mb": data.get("kv_cache_mb"),
+                "total_latency_s": data.get("total_latency_s"),
+                "avg_latency_s": data.get("avg_latency_s"),
+                "max_latency_s": data.get("max_latency_s"),
+                "tokens_per_second": data.get("tokens_per_second"),
+                "profiled_flops": data.get("profiled_flops"),
+                "profiled_tflops": data.get("profiled_tflops"),
+                "profiled_tflops_per_s": data.get("profiled_tflops_per_s"),
             }
 
     if not rows:
@@ -697,7 +725,17 @@ def generate_csv(run_tag: str):
     writer = csv.writer(output)
 
     # Header
-    writer.writerow(["Method"] + all_datasets + ["Average", "Peak GPU (GB)", "KV Cache (MB)"])
+    writer.writerow(
+        ["Method"] + all_datasets + [
+            "Average",
+            "Peak GPU (GB)",
+            "KV Cache (MB)",
+            "Avg Latency (s)",
+            "Throughput (tok/s)",
+            "Profiled TFLOPs",
+            "Profiled TFLOPs/s",
+        ]
+    )
 
     for method in [
         "baseline",
@@ -757,14 +795,38 @@ def generate_csv(run_tag: str):
             method_memory[d]["kv_cache_mb"] for d in all_datasets
             if d in method_memory and method_memory[d].get("kv_cache_mb") is not None
         ]
+        avg_latency_values = [
+            method_memory[d]["avg_latency_s"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("avg_latency_s") is not None
+        ]
+        throughput_values = [
+            method_memory[d]["tokens_per_second"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("tokens_per_second") is not None
+        ]
+        profiled_tflops_values = [
+            method_memory[d]["profiled_tflops"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("profiled_tflops") is not None
+        ]
+        profiled_tflops_per_s_values = [
+            method_memory[d]["profiled_tflops_per_s"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("profiled_tflops_per_s") is not None
+        ]
         peak_gb = round(max(peak_values), 2) if peak_values else ""
         kv_cache_mb = round(max(kv_values), 1) if kv_values else ""
+        avg_latency_s = round(sum(avg_latency_values) / len(avg_latency_values), 3) if avg_latency_values else ""
+        tokens_per_second = round(sum(throughput_values) / len(throughput_values), 2) if throughput_values else ""
+        profiled_tflops = round(sum(profiled_tflops_values) / len(profiled_tflops_values), 6) if profiled_tflops_values else ""
+        profiled_tflops_per_s = round(sum(profiled_tflops_per_s_values) / len(profiled_tflops_per_s_values), 6) if profiled_tflops_per_s_values else ""
         row = (
             [method]
             + [round(s, 2) if s is not None else "" for s in scores]
             + [avg if avg is not None else ""]
             + [peak_gb]
             + [kv_cache_mb]
+            + [avg_latency_s]
+            + [tokens_per_second]
+            + [profiled_tflops]
+            + [profiled_tflops_per_s]
         )
         writer.writerow(row)
 
@@ -787,17 +849,41 @@ def generate_csv(run_tag: str):
     timeout=120
 )
 def verify_eval_complete(run_tag: str, methods: list[str] | None = None):
-    import os
+    import os, json
 
     methods_to_check = methods or STATIC_METHODS
     results_dir = _results_dir(run_tag)
     missing = []
+    missing_metrics = []
+    required_metric_fields = [
+        "peak_gb",
+        "kv_cache_mb",
+        "total_latency_s",
+        "avg_latency_s",
+        "max_latency_s",
+        "tokens_per_second",
+        "profiled_flops",
+        "profiled_tflops",
+        "profiled_tflops_per_s",
+    ]
 
     for method in methods_to_check:
         for dataset in DATASETS:
             path = os.path.join(results_dir, f"{method}_{dataset}.json")
             if not os.path.exists(path):
                 missing.append((method, dataset))
+            metric_path = os.path.join(results_dir, f"{method}_{dataset}_memory.json")
+            if not os.path.exists(metric_path):
+                missing_metrics.append((method, dataset, "missing memory json"))
+                continue
+            with open(metric_path) as f:
+                metric_data = json.load(f)
+            absent_fields = [
+                field for field in required_metric_fields
+                if metric_data.get(field) is None
+            ]
+            if absent_fields:
+                missing_metrics.append((method, dataset, ", ".join(absent_fields)))
 
     if missing:
         print(f"Eval incomplete for run {run_tag}. Missing {len(missing)} result files.")
@@ -805,6 +891,14 @@ def verify_eval_complete(run_tag: str, methods: list[str] | None = None):
             print(f"- missing: {method} / {dataset}")
         if len(missing) > 20:
             print(f"... and {len(missing) - 20} more")
+        return False
+
+    if missing_metrics:
+        print(f"Eval incomplete for run {run_tag}. Missing logged metrics for {len(missing_metrics)} method/dataset pairs.")
+        for method, dataset, detail in missing_metrics[:20]:
+            print(f"- metrics missing: {method} / {dataset} -> {detail}")
+        if len(missing_metrics) > 20:
+            print(f"... and {len(missing_metrics) - 20} more")
         return False
 
     print(f"EVAL PASSED for run {run_tag}")
@@ -824,7 +918,7 @@ def main(version: str = "1", run_tag: str = ""):
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"\nSubmitting {method} / {dataset}...")
-            run_inference.remote(method, dataset, resolved_run_tag)
+            run_inference.spawn(method, dataset, resolved_run_tag)
     print(f"Submitted inference jobs for {len(methods_to_run)} methods across {len(DATASETS)} datasets.")
 
 
@@ -835,20 +929,20 @@ def main_eval_all(run_tag: str):
     for method in methods_to_run:
         for dataset in DATASETS:
             print(f"Evaluating {method} / {dataset}...")
-            run_eval.remote(method, dataset, run_tag)
+            run_eval.spawn(method, dataset, run_tag)
     print(f"Submitted eval jobs for {len(methods_to_run)} methods across {len(DATASETS)} datasets.")
 
 
 @app.local_entrypoint()
 def main_csv(run_tag: str):
     """Generate results CSV from saved eval results."""
-    generate_csv.remote(run_tag)
+    generate_csv.spawn(run_tag)
 
 
 @app.local_entrypoint()
 def main_verify_eval(run_tag: str):
     """Check whether all static-method eval artifacts exist for the given run."""
-    verify_eval_complete.remote(run_tag)
+    verify_eval_complete.spawn(run_tag)
 
 @app.local_entrypoint()
 def main_validate_all_static(version: str = "1", run_tag: str = ""):
@@ -876,7 +970,7 @@ def main_single(version: str = "1", run_tag: str = ""):
     dataset = "hotpotqa"
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_inference.remote(method, dataset, resolved_run_tag)
+    run_inference.spawn(method, dataset, resolved_run_tag)
 
 
 @app.local_entrypoint()
@@ -884,7 +978,7 @@ def main_eval_single(run_tag: str):
     """Eval a single method/dataset combination. Edit method/dataset below."""
     method = "baseline"
     dataset = "hotpotqa"
-    run_eval.remote(method, dataset, run_tag)
+    run_eval.spawn(method, dataset, run_tag)
 
 
 # Convenience entrypoints for methods you've already run
@@ -893,343 +987,343 @@ def main_baseline(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("baseline", dataset, resolved_run_tag)
+        run_inference.spawn("baseline", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_snapkv(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("snapkv_static", dataset, resolved_run_tag)
+        run_inference.spawn("snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_snapkv_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("snapkv_static", dataset, resolved_run_tag)
+        run_inference.spawn("snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_quest(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("quest_static", dataset, resolved_run_tag)
+        run_inference.spawn("quest_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_quest_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("quest_static", dataset, resolved_run_tag)
+        run_inference.spawn("quest_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn_quest_bounds_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn_snapkv_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_snapkv_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn_h2o_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_h2o_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_h2o_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn_recon_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_recon_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_recon_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn_expected_attention_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_expected_attention_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_expected_attention_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterattn_random_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterattn_random_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterattn_random_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds_kmeans_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_kmeans_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_quest_bounds_kmeans_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_quest_bounds_spherical_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_quest_bounds_spherical_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_quest_bounds_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_snapkv_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_snapkv_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv_kmeans_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_snapkv_kmeans_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_snapkv_kmeans_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_snapkv_spherical_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_snapkv_spherical_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_snapkv_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_h2o_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_h2o_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_h2o_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_h2o_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o_kmeans_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_h2o_kmeans_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_h2o_kmeans_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_h2o_spherical_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_h2o_spherical_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_h2o_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_recon(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_recon_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_recon_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_recon_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_recon_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_recon_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_recon_kmeans_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_recon_kmeans_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_recon_kmeans_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_recon_spherical_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_recon_spherical_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_recon_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_expected_attention_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_expected_attention_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_expected_attention_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_expected_attention_kmeans_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_expected_attention_kmeans_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_expected_attention_kmeans_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_expected_attention_spherical_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_expected_attention_spherical_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_expected_attention_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_random(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_random_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_random_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_random_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_random_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_random_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_random_kmeans_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_random_kmeans_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_random_kmeans_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_clusterkv_random_spherical_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("clusterkv_random_spherical_static", dataset, resolved_run_tag)
+        run_inference.spawn("clusterkv_random_spherical_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_pagekv_quest_bounds_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.spawn("pagekv_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_pagekv_snapkv_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_snapkv_static", dataset, resolved_run_tag)
+        run_inference.spawn("pagekv_snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_pagekv_h2o_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_h2o_static", dataset, resolved_run_tag)
+        run_inference.spawn("pagekv_h2o_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_pagekv_recon_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_recon_static", dataset, resolved_run_tag)
+        run_inference.spawn("pagekv_recon_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_pagekv_expected_attention_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_expected_attention_static", dataset, resolved_run_tag)
+        run_inference.spawn("pagekv_expected_attention_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_pagekv_random_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("pagekv_random_static", dataset, resolved_run_tag)
+        run_inference.spawn("pagekv_random_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_tokenkv_quest_bounds_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("tokenkv_quest_bounds_static", dataset, resolved_run_tag)
+        run_inference.spawn("tokenkv_quest_bounds_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_tokenkv_snapkv_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("tokenkv_snapkv_static", dataset, resolved_run_tag)
+        run_inference.spawn("tokenkv_snapkv_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_tokenkv_h2o_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("tokenkv_h2o_static", dataset, resolved_run_tag)
+        run_inference.spawn("tokenkv_h2o_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_tokenkv_recon_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("tokenkv_recon_static", dataset, resolved_run_tag)
+        run_inference.spawn("tokenkv_recon_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_tokenkv_expected_attention_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("tokenkv_expected_attention_static", dataset, resolved_run_tag)
+        run_inference.spawn("tokenkv_expected_attention_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_tokenkv_random_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("tokenkv_random_static", dataset, resolved_run_tag)
+        run_inference.spawn("tokenkv_random_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_snapkv_static(version: str = "1", run_tag: str = ""):
@@ -1247,43 +1341,43 @@ def main_validate_quest_static(version: str = "1", run_tag: str = ""):
 def main_validate_clusterattn_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_validation.remote("clusterattn_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+    run_validation.spawn("clusterattn_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_clusterattn_quest_bounds_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_validation.remote("clusterattn_quest_bounds_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+    run_validation.spawn("clusterattn_quest_bounds_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_clusterattn_snapkv_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_validation.remote("clusterattn_snapkv_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+    run_validation.spawn("clusterattn_snapkv_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_clusterattn_h2o_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_validation.remote("clusterattn_h2o_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+    run_validation.spawn("clusterattn_h2o_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_clusterattn_recon_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_validation.remote("clusterattn_recon_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+    run_validation.spawn("clusterattn_recon_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_clusterattn_expected_attention_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_validation.remote("clusterattn_expected_attention_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+    run_validation.spawn("clusterattn_expected_attention_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_clusterattn_random_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
-    run_validation.remote("clusterattn_random_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
+    run_validation.spawn("clusterattn_random_static", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_validate_pagekv_expected_attention_static(version: str = "1", run_tag: str = ""):
@@ -1408,258 +1502,258 @@ def main_validate_clusterkv_random_spherical_static(version: str = "1", run_tag:
 @app.local_entrypoint()
 def main_eval_baseline(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("baseline", dataset, run_tag)
+        run_eval.spawn("baseline", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_snapkv(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("snapkv_static", dataset, run_tag)
+        run_eval.spawn("snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_snapkv_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("snapkv_static", dataset, run_tag)
+        run_eval.spawn("snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_quest(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("quest_static", dataset, run_tag)
+        run_eval.spawn("quest_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_quest_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("quest_static", dataset, run_tag)
+        run_eval.spawn("quest_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn_quest_bounds_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_quest_bounds_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn_snapkv_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_snapkv_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn_h2o_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_h2o_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_h2o_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn_recon_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_recon_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_recon_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn_expected_attention_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_expected_attention_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_expected_attention_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterattn_random_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterattn_random_static", dataset, run_tag)
+        run_eval.spawn("clusterattn_random_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds_kmeans_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_kmeans_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_quest_bounds_kmeans_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_quest_bounds_spherical_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_quest_bounds_spherical_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_quest_bounds_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_snapkv_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_snapkv_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv_kmeans_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_snapkv_kmeans_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_snapkv_kmeans_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_snapkv_spherical_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_snapkv_spherical_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_snapkv_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_h2o_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_h2o_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_h2o_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_h2o_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o_kmeans_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_h2o_kmeans_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_h2o_kmeans_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_h2o_spherical_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_h2o_spherical_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_h2o_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_recon_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_recon_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_recon_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_recon_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon_kmeans_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_recon_kmeans_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_recon_kmeans_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_recon_spherical_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_recon_spherical_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_recon_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_expected_attention_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_expected_attention_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_expected_attention_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_expected_attention_kmeans_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_expected_attention_kmeans_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_expected_attention_kmeans_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_expected_attention_spherical_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_expected_attention_spherical_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_expected_attention_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_random_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_random_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_random_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_random_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random_kmeans_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_random_kmeans_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_random_kmeans_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_clusterkv_random_spherical_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("clusterkv_random_spherical_static", dataset, run_tag)
+        run_eval.spawn("clusterkv_random_spherical_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_pagekv_quest_bounds_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_quest_bounds_static", dataset, run_tag)
+        run_eval.spawn("pagekv_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_pagekv_snapkv_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_snapkv_static", dataset, run_tag)
+        run_eval.spawn("pagekv_snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_pagekv_h2o_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_h2o_static", dataset, run_tag)
+        run_eval.spawn("pagekv_h2o_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_pagekv_recon_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_recon_static", dataset, run_tag)
+        run_eval.spawn("pagekv_recon_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_pagekv_expected_attention_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_expected_attention_static", dataset, run_tag)
+        run_eval.spawn("pagekv_expected_attention_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_pagekv_random_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("pagekv_random_static", dataset, run_tag)
+        run_eval.spawn("pagekv_random_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_tokenkv_quest_bounds_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("tokenkv_quest_bounds_static", dataset, run_tag)
+        run_eval.spawn("tokenkv_quest_bounds_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_tokenkv_snapkv_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("tokenkv_snapkv_static", dataset, run_tag)
+        run_eval.spawn("tokenkv_snapkv_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_tokenkv_h2o_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("tokenkv_h2o_static", dataset, run_tag)
+        run_eval.spawn("tokenkv_h2o_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_tokenkv_recon_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("tokenkv_recon_static", dataset, run_tag)
+        run_eval.spawn("tokenkv_recon_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_tokenkv_expected_attention_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("tokenkv_expected_attention_static", dataset, run_tag)
+        run_eval.spawn("tokenkv_expected_attention_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_tokenkv_random_static(run_tag: str):
     for dataset in DATASETS:
-        run_eval.remote("tokenkv_random_static", dataset, run_tag)
+        run_eval.spawn("tokenkv_random_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_h2o(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("h2o_static", dataset, resolved_run_tag)
+        run_inference.spawn("h2o_static", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
 def main_h2o_static(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
     for dataset in DATASETS:
-        run_inference.remote("h2o_static", dataset, resolved_run_tag)
+        run_inference.spawn("h2o_static", dataset, resolved_run_tag)

@@ -6,6 +6,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 import argparse
+import time
 import torch
 from snapkv.monkeypatch.monkeypatch import (
     replace_llama,
@@ -99,8 +100,12 @@ def get_pred_single_gpu(data, max_length, max_gen,
 
     printed = False
     context_lengths = []
+    latencies_s = []
+    generated_tokens = []
+    profiled_flops = None
+    profiled_latency_s = None
 
-    for json_obj in tqdm(data):
+    for idx, json_obj in enumerate(tqdm(data)):
         if compress:
             layers = len(model.model.layers)
             if method == 'snapkv':
@@ -156,28 +161,46 @@ def get_pred_single_gpu(data, max_length, max_gen,
             print(prompt)
             printed = True
 
+        generate_kwargs = dict(
+            **input,
+            max_new_tokens=max_gen,
+            num_beams=1,
+            do_sample=False,
+            temperature=1.0,
+            min_length=context_length + 1,
+        )
         if dataset == "samsum":
-            output = model.generate(
-                **input,
-                max_new_tokens=max_gen,
-                num_beams=1,
-                do_sample=False,
-                temperature=1.0,
-                min_length=context_length + 1,
-                eos_token_id=[tokenizer.eos_token_id, tokenizer.encode("\n", add_special_tokens=False)[-1]],
-            )[0]
+            generate_kwargs["eos_token_id"] = [tokenizer.eos_token_id, tokenizer.encode("\n", add_special_tokens=False)[-1]]
+
+        torch.cuda.synchronize()
+        start_time = time.perf_counter()
+        if idx == 0:
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                record_shapes=False,
+                profile_memory=False,
+                with_flops=True,
+            ) as prof:
+                output = model.generate(**generate_kwargs)[0]
+            torch.cuda.synchronize()
+            profiled_latency_s = time.perf_counter() - start_time
+            profiled_flops = 0.0
+            for evt in prof.key_averages():
+                flops = getattr(evt, "flops", 0) or 0
+                profiled_flops += float(flops)
         else:
-            output = model.generate(
-                **input,
-                max_new_tokens=max_gen,
-                num_beams=1,
-                do_sample=False,
-                temperature=1.0,
-                min_length=context_length + 1,
-            )[0]
+            output = model.generate(**generate_kwargs)[0]
+            torch.cuda.synchronize()
+
+        step_latency_s = time.perf_counter() - start_time
+        latencies_s.append(step_latency_s)
 
         pred = tokenizer.decode(output[context_length:], skip_special_tokens=True)
         pred = post_process(pred, model_name)
+        generated_tokens.append(max(int(output.shape[0] - context_length), 0))
         with open(out_path, "a", encoding="utf-8") as f:
             json.dump({"pred": pred, "answers": json_obj["answers"], "all_classes": json_obj["all_classes"], "length": json_obj["length"]}, f, ensure_ascii=False)
             f.write('\n')
@@ -189,14 +212,36 @@ def get_pred_single_gpu(data, max_length, max_gen,
     current_mb = torch.cuda.memory_allocated() / 1024**2
     avg_ctx = sum(context_lengths) / len(context_lengths) if context_lengths else 0
     max_ctx = max(context_lengths) if context_lengths else 0
+    total_latency_s = sum(latencies_s)
+    avg_latency_s = total_latency_s / len(latencies_s) if latencies_s else 0
+    max_latency_s = max(latencies_s) if latencies_s else 0
+    avg_generated_tokens = sum(generated_tokens) / len(generated_tokens) if generated_tokens else 0
+    tokens_per_second = (sum(generated_tokens) / total_latency_s) if total_latency_s > 0 else 0
+    profiled_tflops = (profiled_flops / 1e12) if profiled_flops is not None else None
+    profiled_tflops_per_s = (
+        profiled_tflops / profiled_latency_s
+        if profiled_tflops is not None and profiled_latency_s and profiled_latency_s > 0
+        else None
+    )
 
     print(f"\n{'='*50}")
-    print(f"=== MEMORY SUMMARY ({method if compress else 'full'}) ===")
+    print(f"=== INFERENCE SUMMARY ({method if compress else 'full'}) ===")
     print(f"Peak GPU memory allocated:    {peak_mb:.1f} MB  ({peak_gb:.2f} GB)")
     print(f"Current GPU memory allocated: {current_mb:.1f} MB")
     print(f"Memory for KV cache (approx): {peak_mb - memory_after_load_mb:.1f} MB")
     print(f"Average context length:       {avg_ctx:.0f} tokens")
     print(f"Max context length:           {max_ctx} tokens")
+    print(f"Total latency:                {total_latency_s:.3f} s")
+    print(f"Average latency / example:    {avg_latency_s:.3f} s")
+    print(f"Max latency / example:        {max_latency_s:.3f} s")
+    print(f"Average generated tokens:     {avg_generated_tokens:.1f}")
+    print(f"Generation throughput:        {tokens_per_second:.2f} tok/s")
+    if profiled_flops is not None:
+        print(f"Profiled FLOPs (1st example): {profiled_flops:.0f}")
+    if profiled_tflops is not None:
+        print(f"Profiled TFLOPs (1st example): {profiled_tflops:.6f}")
+    if profiled_tflops_per_s is not None:
+        print(f"Profiled TFLOPs/s (1st example): {profiled_tflops_per_s:.6f}")
     print(f"{'='*50}\n")
 
 
