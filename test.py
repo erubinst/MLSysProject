@@ -439,6 +439,7 @@ def run_inference(method: str, dataset: str, run_tag: str):
         "python", cfg["script"],
         "--model", "mistral-7B-instruct-v0.2",
         "--dataset", dataset,
+        "--write_model_name", cfg["model_name"],
     ] + cfg["extra_args"]
 
     print(f"\n{'='*50}")
@@ -539,6 +540,7 @@ def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset
         "--dataset", dataset,
         "--limit", "1",
         "--sample_offset", str(sample_offset),
+        "--write_model_name", cfg["model_name"],
     ] + cfg["extra_args"]
 
     print(f"\n{'='*50}")

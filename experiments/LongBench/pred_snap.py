@@ -33,6 +33,7 @@ def parse_args(args=None):
     parser.add_argument('--dataset', type=str, default='qasper', help="Dataset to evaluate on")
     parser.add_argument('--limit', type=int, default=None, help="Optional number of examples to run")
     parser.add_argument('--sample_offset', type=int, default=0, help="Optional starting index into the dataset")
+    parser.add_argument('--write_model_name', type=str, default=None, help="Explicit output subdirectory name for pred/pred_e")
     return parser.parse_args(args)
 
 def build_chat(tokenizer, prompt, model_name):
@@ -318,7 +319,7 @@ if __name__ == '__main__':
     if args.compress_args_path:
         compress_args = json.load(open(os.path.join('config', args.compress_args_path), "r"))
         compress = True
-        write_model_name = model_name + args.compress_args_path.split(".")[0]
+        write_model_name = args.write_model_name or (model_name + args.compress_args_path.split(".")[0])
         if args.method == 'snapkv':
             replace_llama()
             replace_mistral()
@@ -336,7 +337,7 @@ if __name__ == '__main__':
     else:
         compress = False
         compress_args = None
-        write_model_name = model_name
+        write_model_name = args.write_model_name or model_name
 
     if args.e:
         data = load_dataset('THUDM/LongBench', f"{dataset}_e", split='test', trust_remote_code=True)
