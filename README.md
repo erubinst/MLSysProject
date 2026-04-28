@@ -87,6 +87,10 @@ For a fast sanity check before the full benchmark:
 modal run --detach test.py::main_validate_all_static --version 1
 ```
 
+Important:
+- `main`, `main_eval_all`, and `main_validate_all_static` cover the default full static matrix only.
+- Dynamic methods are available, but they are not part of the default full-batch workflow.
+
 ## Running Without Keeping The CLI Open
 Use `modal run --detach ...` to submit jobs and return immediately:
 
@@ -315,6 +319,41 @@ Status: `done`
 - `tokenkv_expected_attention_static`
 - `tokenkv_random_static`
 
+### Dynamic methods currently implemented
+
+ClusterAttn dynamic:
+- `clusterattn_dynamic`
+- `clusterattn_quest_bounds_dynamic`
+- `clusterattn_h2o_dynamic`
+- `clusterattn_expected_attention_dynamic`
+- `clusterattn_random_dynamic`
+
+PageKV dynamic:
+- `pagekv_quest_bounds_dynamic`
+- `pagekv_h2o_dynamic`
+- `pagekv_expected_attention_dynamic`
+- `pagekv_random_dynamic`
+
+TokenKV dynamic:
+- `tokenkv_quest_bounds_dynamic`
+- `tokenkv_h2o_dynamic`
+- `tokenkv_expected_attention_dynamic`
+- `tokenkv_random_dynamic`
+
+### Dynamic coverage summary
+- Dynamic variants exist for:
+  - `clusterattn`
+  - `pagekv`
+  - `tokenkv`
+- Dynamic variants do not exist for:
+  - `clusterkv`
+  - `snapkv_static`
+  - `quest_static`
+  - standalone `h2o_static`
+- SnapKV-style dynamic hybrids were intentionally removed.
+- Reconstruction-error dynamic variants were intentionally removed.
+- Expected Attention has both static and dynamic variants.
+
 ### Clustering backends
 Current real `clusterkv` clustering backends:
 - `kmeans`
@@ -372,6 +411,12 @@ Examples:
 ### `tokenkv_*_static`
 - score prefix tokens directly
 - keep top-scoring tokens plus recent window
+
+### `clusterattn_*_dynamic`, `pagekv_*_dynamic`, `tokenkv_*_dynamic`
+- dynamic decode-time eviction variants for the non-`clusterkv` families
+- they recompress the retained prefix during generation instead of compressing only once at prefill
+- `h2o` and `quest_bounds` are the most natural dynamic variants
+- `expected_attention_dynamic` uses a periodic refresh design with buffered recent queries
 
 ### `h2o_static`
 - experiment label exists
