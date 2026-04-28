@@ -102,6 +102,8 @@ def get_pred_single_gpu(data, max_length, max_gen,
     printed = False
     context_lengths = []
     latencies_s = []
+    prefill_latencies_s = []
+    decode_latencies_s = []
     generated_tokens = []
     profiled_flops = None
     profiled_latency_s = None
@@ -173,6 +175,16 @@ def get_pred_single_gpu(data, max_length, max_gen,
         if dataset == "samsum":
             generate_kwargs["eos_token_id"] = [tokenizer.eos_token_id, tokenizer.encode("\n", add_special_tokens=False)[-1]]
 
+        # Measure prefill latency (processing the input prompt)
+        torch.cuda.synchronize()
+        prefill_start = time.perf_counter()
+        with torch.no_grad():
+            _ = model(input.input_ids, attention_mask=input.get("attention_mask"))
+        torch.cuda.synchronize()
+        prefill_latency_s = time.perf_counter() - prefill_start
+        prefill_latencies_s.append(prefill_latency_s)
+        
+        # Measure total latency (prefill + decode)
         torch.cuda.synchronize()
         start_time = time.perf_counter()
         if idx == 0:
@@ -198,6 +210,10 @@ def get_pred_single_gpu(data, max_length, max_gen,
 
         step_latency_s = time.perf_counter() - start_time
         latencies_s.append(step_latency_s)
+        
+        # Calculate decode latency as total - prefill
+        decode_latency_s = max(0, step_latency_s - prefill_latency_s)
+        decode_latencies_s.append(decode_latency_s)
 
         pred = tokenizer.decode(output[context_length:], skip_special_tokens=True)
         pred = post_process(pred, model_name)
@@ -216,6 +232,16 @@ def get_pred_single_gpu(data, max_length, max_gen,
     total_latency_s = sum(latencies_s)
     avg_latency_s = total_latency_s / len(latencies_s) if latencies_s else 0
     max_latency_s = max(latencies_s) if latencies_s else 0
+    
+    # Calculate prefill and decode latencies
+    total_prefill_latency_s = sum(prefill_latencies_s)
+    avg_prefill_latency_s = total_prefill_latency_s / len(prefill_latencies_s) if prefill_latencies_s else 0
+    max_prefill_latency_s = max(prefill_latencies_s) if prefill_latencies_s else 0
+    
+    total_decode_latency_s = sum(decode_latencies_s)
+    avg_decode_latency_s = total_decode_latency_s / len(decode_latencies_s) if decode_latencies_s else 0
+    max_decode_latency_s = max(decode_latencies_s) if decode_latencies_s else 0
+    
     avg_generated_tokens = sum(generated_tokens) / len(generated_tokens) if generated_tokens else 0
     tokens_per_second = (sum(generated_tokens) / total_latency_s) if total_latency_s > 0 else 0
     profiled_tflops = (profiled_flops / 1e12) if profiled_flops is not None else None
@@ -233,6 +259,10 @@ def get_pred_single_gpu(data, max_length, max_gen,
     print(f"Average context length:       {avg_ctx:.0f} tokens")
     print(f"Max context length:           {max_ctx} tokens")
     print(f"Total latency:                {total_latency_s:.3f} s")
+    print(f"Average prefill latency:      {avg_prefill_latency_s:.3f} s")
+    print(f"Average decode latency:       {avg_decode_latency_s:.3f} s")
+    print(f"Max prefill latency:          {max_prefill_latency_s:.3f} s")
+    print(f"Max decode latency:           {max_decode_latency_s:.3f} s")
     print(f"Average latency / example:    {avg_latency_s:.3f} s")
     print(f"Max latency / example:        {max_latency_s:.3f} s")
     print(f"Average generated tokens:     {avg_generated_tokens:.1f}")

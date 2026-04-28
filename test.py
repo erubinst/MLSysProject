@@ -554,6 +554,10 @@ def run_inference(method: str, dataset: str, run_tag: str):
     peak_match = re.search(r"Peak GPU memory allocated:\s+([0-9.]+)\s+MB\s+\(([0-9.]+)\s+GB\)", result.stdout)
     kv_match = re.search(r"Memory for KV cache \(approx\):\s+([0-9.]+)\s+MB", result.stdout)
     total_latency_match = re.search(r"Total latency:\s+([0-9.]+)\s+s", result.stdout)
+    avg_prefill_latency_match = re.search(r"Average prefill latency:\s+([0-9.]+)\s+s", result.stdout)
+    avg_decode_latency_match = re.search(r"Average decode latency:\s+([0-9.]+)\s+s", result.stdout)
+    max_prefill_latency_match = re.search(r"Max prefill latency:\s+([0-9.]+)\s+s", result.stdout)
+    max_decode_latency_match = re.search(r"Max decode latency:\s+([0-9.]+)\s+s", result.stdout)
     avg_latency_match = re.search(r"Average latency / example:\s+([0-9.]+)\s+s", result.stdout)
     max_latency_match = re.search(r"Max latency / example:\s+([0-9.]+)\s+s", result.stdout)
     throughput_match = re.search(r"Generation throughput:\s+([0-9.]+)\s+tok/s", result.stdout)
@@ -564,6 +568,10 @@ def run_inference(method: str, dataset: str, run_tag: str):
     peak_gb = float(peak_match.group(2)) if peak_match else None
     kv_cache_mb = float(kv_match.group(1)) if kv_match else None
     total_latency_s = float(total_latency_match.group(1)) if total_latency_match else None
+    avg_prefill_latency_s = float(avg_prefill_latency_match.group(1)) if avg_prefill_latency_match else None
+    avg_decode_latency_s = float(avg_decode_latency_match.group(1)) if avg_decode_latency_match else None
+    max_prefill_latency_s = float(max_prefill_latency_match.group(1)) if max_prefill_latency_match else None
+    max_decode_latency_s = float(max_decode_latency_match.group(1)) if max_decode_latency_match else None
     avg_latency_s = float(avg_latency_match.group(1)) if avg_latency_match else None
     max_latency_s = float(max_latency_match.group(1)) if max_latency_match else None
     tokens_per_second = float(throughput_match.group(1)) if throughput_match else None
@@ -582,6 +590,10 @@ def run_inference(method: str, dataset: str, run_tag: str):
                 "peak_gb": peak_gb,
                 "kv_cache_mb": kv_cache_mb,
                 "total_latency_s": total_latency_s,
+                "avg_prefill_latency_s": avg_prefill_latency_s,
+                "avg_decode_latency_s": avg_decode_latency_s,
+                "max_prefill_latency_s": max_prefill_latency_s,
+                "max_decode_latency_s": max_decode_latency_s,
                 "avg_latency_s": avg_latency_s,
                 "max_latency_s": max_latency_s,
                 "tokens_per_second": tokens_per_second,
@@ -842,6 +854,10 @@ def generate_csv(run_tag: str):
                 "peak_gb": data.get("peak_gb"),
                 "kv_cache_mb": data.get("kv_cache_mb"),
                 "total_latency_s": data.get("total_latency_s"),
+                "avg_prefill_latency_s": data.get("avg_prefill_latency_s"),
+                "avg_decode_latency_s": data.get("avg_decode_latency_s"),
+                "max_prefill_latency_s": data.get("max_prefill_latency_s"),
+                "max_decode_latency_s": data.get("max_decode_latency_s"),
                 "avg_latency_s": data.get("avg_latency_s"),
                 "max_latency_s": data.get("max_latency_s"),
                 "tokens_per_second": data.get("tokens_per_second"),
@@ -866,6 +882,10 @@ def generate_csv(run_tag: str):
             "Peak GPU (GB)",
             "KV Cache (MB)",
             "Avg Latency (s)",
+            "Avg Prefill Latency (s)",
+            "Avg Decode Latency (s)",
+            "Max Prefill Latency (s)",
+            "Max Decode Latency (s)",
             "Throughput (tok/s)",
             "Profiled TFLOPs",
             "Profiled TFLOPs/s",
@@ -947,6 +967,22 @@ def generate_csv(run_tag: str):
             method_memory[d]["avg_latency_s"] for d in all_datasets
             if d in method_memory and method_memory[d].get("avg_latency_s") is not None
         ]
+        avg_prefill_latency_values = [
+            method_memory[d]["avg_prefill_latency_s"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("avg_prefill_latency_s") is not None
+        ]
+        avg_decode_latency_values = [
+            method_memory[d]["avg_decode_latency_s"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("avg_decode_latency_s") is not None
+        ]
+        max_prefill_latency_values = [
+            method_memory[d]["max_prefill_latency_s"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("max_prefill_latency_s") is not None
+        ]
+        max_decode_latency_values = [
+            method_memory[d]["max_decode_latency_s"] for d in all_datasets
+            if d in method_memory and method_memory[d].get("max_decode_latency_s") is not None
+        ]
         throughput_values = [
             method_memory[d]["tokens_per_second"] for d in all_datasets
             if d in method_memory and method_memory[d].get("tokens_per_second") is not None
@@ -962,6 +998,10 @@ def generate_csv(run_tag: str):
         peak_gb = round(max(peak_values), 2) if peak_values else ""
         kv_cache_mb = round(max(kv_values), 1) if kv_values else ""
         avg_latency_s = round(sum(avg_latency_values) / len(avg_latency_values), 3) if avg_latency_values else ""
+        avg_prefill_latency_s = round(sum(avg_prefill_latency_values) / len(avg_prefill_latency_values), 3) if avg_prefill_latency_values else ""
+        avg_decode_latency_s = round(sum(avg_decode_latency_values) / len(avg_decode_latency_values), 3) if avg_decode_latency_values else ""
+        max_prefill_latency_s = round(sum(max_prefill_latency_values) / len(max_prefill_latency_values), 3) if max_prefill_latency_values else ""
+        max_decode_latency_s = round(sum(max_decode_latency_values) / len(max_decode_latency_values), 3) if max_decode_latency_values else ""
         tokens_per_second = round(sum(throughput_values) / len(throughput_values), 2) if throughput_values else ""
         profiled_tflops = round(sum(profiled_tflops_values) / len(profiled_tflops_values), 6) if profiled_tflops_values else ""
         profiled_tflops_per_s = round(sum(profiled_tflops_per_s_values) / len(profiled_tflops_per_s_values), 6) if profiled_tflops_per_s_values else ""
@@ -972,6 +1012,10 @@ def generate_csv(run_tag: str):
             + [peak_gb]
             + [kv_cache_mb]
             + [avg_latency_s]
+            + [avg_prefill_latency_s]
+            + [avg_decode_latency_s]
+            + [max_prefill_latency_s]
+            + [max_decode_latency_s]
             + [tokens_per_second]
             + [profiled_tflops]
             + [profiled_tflops_per_s]
