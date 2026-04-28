@@ -91,7 +91,13 @@ class ClusterKVCache:
                  observation_window: int = 32, selection_granularity: str = 'page',
                  clustering_backend: str = 'kmeanspp',
                  num_block: int = 12,
-                 theta: float = 0.0):
+                 theta: float = 0.0,
+                 n_future_positions: int = 512,
+                 n_sink: int = 4,
+                 use_covariance: bool = True,
+                 use_vnorm: bool = True,
+                 epsilon: float = 0.0,
+                 hidden_states_buffer_size: int = 128):
         """
         Args:
             n_clusters: Number of clusters for k-means
@@ -120,12 +126,23 @@ class ClusterKVCache:
         self.clustering_backend = clustering_backend or "kmeanspp"
         self.num_block = num_block
         self.theta = theta
+        self.n_future_positions = n_future_positions
+        self.n_sink = n_sink
+        self.use_covariance = use_covariance
+        self.use_vnorm = use_vnorm
+        self.epsilon = epsilon
+        self.hidden_states_buffer_size = hidden_states_buffer_size
 
         self.kmeans = None
         self.cluster_assignments = None
         self.compressed_keys = None
         self.compressed_values = None
         self.tokens_processed = 0
+        self.last_refresh_total_len = 0
+        self.expected_query_buffer = None
+        self.active_pre_rope_query_states = None
+        self.active_layer_module = None
+        self.active_total_len = 0
 
     def reset(self):
         """Reset the cache"""
@@ -134,6 +151,139 @@ class ClusterKVCache:
         self.compressed_keys = None
         self.compressed_values = None
         self.tokens_processed = 0
+        self.last_refresh_total_len = 0
+        self.expected_query_buffer = None
+        self.active_pre_rope_query_states = None
+        self.active_layer_module = None
+        self.active_total_len = 0
+
+    def _append_expected_query_buffer(self, pre_rope_query_states: torch.Tensor, total_len: int):
+        if pre_rope_query_states is None:
+            return
+
+        if pre_rope_query_states.shape[2] > 1 or total_len == pre_rope_query_states.shape[2]:
+            buffered = pre_rope_query_states
+        else:
+            new_states = pre_rope_query_states[:, :, -1:, :]
+            if self.expected_query_buffer is None:
+                buffered = new_states
+            else:
+                buffered = torch.cat([self.expected_query_buffer, new_states], dim=2)
+
+        if self.hidden_states_buffer_size > 0 and buffered.shape[2] > self.hidden_states_buffer_size:
+            buffered = buffered[:, :, -self.hidden_states_buffer_size :, :]
+        self.expected_query_buffer = buffered
+
+    def _rotate_mean_and_var_over_future_positions(self, mu: torch.Tensor, var: torch.Tensor):
+        module = self.active_layer_module
+        if module is None:
+            return mu, var
+
+        head_dim = mu.shape[-1]
+        half_dim = head_dim // 2
+        if half_dim == 0:
+            return mu, var
+
+        future_start = int(self.active_total_len)
+        future_end = future_start + max(1, int(self.n_future_positions))
+
+        dummy = mu.new_zeros((mu.shape[0], 1, 1, head_dim))
+        cos, sin = module.rotary_emb(dummy, seq_len=future_end)
+
+        while cos.dim() > 2:
+            cos = cos[0]
+            sin = sin[0]
+
+        cos = cos[future_start:future_end]
+        sin = sin[future_start:future_end]
+
+        if cos.shape[-1] != half_dim:
+            cos = cos[..., :half_dim]
+            sin = sin[..., :half_dim]
+
+        mu1, mu2 = mu[..., :half_dim], mu[..., half_dim : 2 * half_dim]
+        var1, var2 = var[..., :half_dim], var[..., half_dim : 2 * half_dim]
+
+        cos = cos.to(mu.dtype).unsqueeze(0).unsqueeze(0)
+        sin = sin.to(mu.dtype).unsqueeze(0).unsqueeze(0)
+
+        mu1_rot = mu1.unsqueeze(2) * cos - mu2.unsqueeze(2) * sin
+        mu2_rot = mu1.unsqueeze(2) * sin + mu2.unsqueeze(2) * cos
+        mu_rot = torch.cat([mu1_rot, mu2_rot], dim=-1).mean(dim=2)
+
+        if head_dim > 2 * half_dim:
+            mu_rot = torch.cat([mu_rot, mu[..., 2 * half_dim :]], dim=-1)
+
+        cos2 = cos.pow(2)
+        sin2 = sin.pow(2)
+        var1_rot = var1.unsqueeze(2) * cos2 + var2.unsqueeze(2) * sin2
+        var2_rot = var1.unsqueeze(2) * sin2 + var2.unsqueeze(2) * cos2
+        var_rot = torch.cat([var1_rot, var2_rot], dim=-1).mean(dim=2)
+
+        if head_dim > 2 * half_dim:
+            var_rot = torch.cat([var_rot, var[..., 2 * half_dim :].unsqueeze(2).expand(-1, -1, var_rot.shape[2], -1)], dim=-1)
+            var_rot = var_rot.mean(dim=2)
+        else:
+            var_rot = var_rot
+
+        return mu_rot, var_rot
+
+    def _score_tokens_expected_attention_paper(self, prefix_keys: torch.Tensor, prefix_values: torch.Tensor):
+        bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
+        if prefix_len == 0:
+            return prefix_keys.new_empty((bsz, num_heads, 0))
+
+        pre_rope_query_states = self.active_pre_rope_query_states
+        if pre_rope_query_states is None or self.active_layer_module is None:
+            fallback_queries = prefix_keys.new_zeros((bsz, num_heads, 1, head_dim))
+            return self._score_tokens_expected_attention_closed_form(prefix_keys, fallback_queries)
+
+        query_states = pre_rope_query_states
+        if query_states.shape[2] > self.n_sink:
+            query_states = query_states[:, :, self.n_sink :, :]
+
+        if query_states.shape[2] == 0:
+            query_states = pre_rope_query_states
+
+        mu = query_states.mean(dim=2)
+        if self.use_covariance:
+            var = query_states.var(dim=2, unbiased=False)
+        else:
+            var = torch.zeros_like(mu)
+
+        mu, var = self._rotate_mean_and_var_over_future_positions(mu, var)
+
+        token_scores = torch.einsum("bhd,bhkd->bhk", mu, prefix_keys) / math.sqrt(head_dim)
+        if self.use_covariance:
+            token_scores = token_scores + 0.5 * torch.einsum("bhd,bhkd->bhk", var, prefix_keys.pow(2)) / head_dim
+
+        token_scores = torch.softmax(token_scores, dim=-1)
+
+        if self.use_vnorm:
+            token_scores = (token_scores + self.epsilon) * prefix_values.norm(dim=-1)
+
+        if prefix_len > 0 and self.n_sink > 0:
+            keep = min(self.n_sink, prefix_len)
+            sink_value = token_scores.max(dim=-1, keepdim=True).values
+            token_scores[:, :, :keep] = sink_value
+
+        return token_scores
+
+    def _score_tokens_expected_attention_closed_form(self, prefix_keys: torch.Tensor, query_states: torch.Tensor):
+        bsz, num_heads, prefix_len, head_dim = prefix_keys.shape
+        if prefix_len == 0:
+            return prefix_keys.new_empty((bsz, num_heads, 0))
+
+        sampled_queries = self._sample_queries(query_states, mode="uniform")
+        mu = sampled_queries.mean(dim=2)
+        var = sampled_queries.var(dim=2, unbiased=False) if sampled_queries.shape[2] > 1 else torch.zeros_like(mu)
+
+        token_scores = torch.einsum("bhd,bhkd->bhk", mu, prefix_keys) / math.sqrt(head_dim)
+        if self.use_covariance:
+            token_scores = token_scores + 0.5 * torch.einsum("bhd,bhkd->bhk", var, prefix_keys.pow(2)) / head_dim
+
+        token_scores = torch.softmax(token_scores, dim=-1)
+        return (token_scores + self.epsilon) * prefix_keys.norm(dim=-1) if self.use_vnorm else token_scores
 
     def _pad_to_pages(self, tensor: torch.Tensor):
         bsz, num_heads, prefix_len, head_dim = tensor.shape
@@ -385,15 +535,7 @@ class ClusterKVCache:
             empty_pages = prefix_keys.new_empty((bsz, num_heads, 0, self.page_size, head_dim))
             return empty_scores, empty_pages, prefix_len
 
-        sampled_queries = self._sample_queries(query_states, mode="uniform")
-        query_mean = sampled_queries.mean(dim=2)
-        query_var = sampled_queries.var(dim=2, unbiased=False)
-
-        token_scores = (
-            torch.einsum("bhd,bhkd->bhk", query_mean, prefix_keys) / math.sqrt(head_dim)
-            + 0.5 * torch.einsum("bhd,bhkd->bhk", query_var, prefix_keys.pow(2)) / head_dim
-        )
-        token_scores = torch.exp(token_scores)
+        token_scores = self._score_tokens_expected_attention_paper(prefix_keys, prefix_keys)
 
         page_scores = self._aggregate_token_scores_to_pages(token_scores, prefix_len)
         page_keys, _, _ = self._pad_to_pages(prefix_keys)
@@ -404,15 +546,7 @@ class ClusterKVCache:
         if prefix_len == 0:
             return prefix_keys.new_empty((bsz, num_heads, 0))
 
-        sampled_queries = self._sample_queries(query_states, mode="uniform")
-        query_mean = sampled_queries.mean(dim=2)
-        query_var = sampled_queries.var(dim=2, unbiased=False)
-
-        token_scores = (
-            torch.einsum("bhd,bhkd->bhk", query_mean, prefix_keys) / math.sqrt(head_dim)
-            + 0.5 * torch.einsum("bhd,bhkd->bhk", query_var, prefix_keys.pow(2)) / head_dim
-        )
-        return torch.exp(token_scores)
+        return self._score_tokens_expected_attention_closed_form(prefix_keys, query_states)
 
     def _select_clusterattn_density(
         self,
@@ -696,38 +830,105 @@ class ClusterKVCache:
 
     def update_kv(self, key_states: torch.Tensor, query_states: torch.Tensor,
                   value_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None,
-                  num_key_value_groups: int = 1):
+                  num_key_value_groups: int = 1, pre_rope_query_states: Optional[torch.Tensor] = None,
+                  layer_module: Optional[object] = None, total_seq_len: Optional[int] = None):
         """
         Update KV cache using query-aware retrieval.
         """
         bsz, num_heads, q_len, head_dim = query_states.shape
+        cache_len = key_states.shape[2]
+        total_len = int(total_seq_len) if total_seq_len is not None else cache_len
+        self._append_expected_query_buffer(pre_rope_query_states, total_len)
 
         # During prompt phase, keep all tokens if below capacity
-        if q_len < self.max_capacity_prompt:
+        if cache_len < self.max_capacity_prompt:
+            self.compressed_keys = None
+            self.compressed_values = None
+            self.tokens_processed = 0
+            self.last_refresh_total_len = total_len
             return key_states, value_states
 
         if query_states is not None:
-            current_queries = query_states[:, :, -1, :]
-            k_past = key_states[:, :, :-self.window_size, :]
-            v_past = value_states[:, :, :-self.window_size, :]
-            if self.selection_granularity == 'token':
-                k_past_compress, v_past_compress = self._select_topk_tokens(k_past, v_past, current_queries, query_states)
-            elif self.selection_granularity == 'page':
-                k_past_compress, v_past_compress = self._select_topk_pages(k_past, v_past, current_queries, query_states)
-            elif self.selection_granularity == 'cluster':
-                k_past_compress, v_past_compress = self._select_topk_clusters(k_past, v_past, current_queries, query_states)
-            elif self.selection_granularity == 'clusterattn':
-                k_past_compress, v_past_compress = self._select_clusterattn_density(k_past, v_past, current_queries, query_states)
-            else:
-                raise ValueError(f"Unsupported selection granularity: {self.selection_granularity}")
-
+            token_budget = max(self.max_capacity_prompt - self.window_size, 0)
             k_cur = key_states[:, :, -self.window_size:, :]
             v_cur = value_states[:, :, -self.window_size:, :]
+            generated_since_refresh = max(total_len - max(self.last_refresh_total_len, self.max_capacity_prompt), 0)
 
-            key_states = torch.cat([k_past_compress, k_cur], dim=2)
-            value_states = torch.cat([v_past_compress, v_cur], dim=2)
+            def _refresh_prefix():
+                current_queries = query_states[:, :, -1, :]
+                k_past = key_states[:, :, :-self.window_size, :]
+                v_past = value_states[:, :, :-self.window_size, :]
+                self.active_pre_rope_query_states = self.expected_query_buffer if self.expected_query_buffer is not None else pre_rope_query_states
+                self.active_layer_module = layer_module
+                self.active_total_len = total_len
+                if self.selection_granularity == 'token':
+                    result = self._select_topk_tokens(k_past, v_past, current_queries, query_states)
+                elif self.selection_granularity == 'page':
+                    result = self._select_topk_pages(k_past, v_past, current_queries, query_states)
+                elif self.selection_granularity == 'cluster':
+                    result = self._select_topk_clusters(k_past, v_past, current_queries, query_states)
+                elif self.selection_granularity == 'clusterattn':
+                    result = self._select_clusterattn_density(k_past, v_past, current_queries, query_states)
+                else:
+                    raise ValueError(f"Unsupported selection granularity: {self.selection_granularity}")
+                self.active_pre_rope_query_states = None
+                self.active_layer_module = None
+                self.active_total_len = 0
+                return result
+
+            should_refresh = False
+            if self.update_policy == 'static':
+                should_refresh = self.compressed_keys is None or self.compressed_values is None
+            elif self.update_policy == 'incremental':
+                should_refresh = True
+            elif self.update_policy == 'periodic':
+                should_refresh = (
+                    self.compressed_keys is None
+                    or self.compressed_values is None
+                    or generated_since_refresh >= max(1, self.update_interval)
+                )
+            else:
+                raise ValueError(f"Unsupported update policy: {self.update_policy}")
+
+            if should_refresh:
+                k_past_compress, v_past_compress = _refresh_prefix()
+                self.compressed_keys = k_past_compress
+                self.compressed_values = v_past_compress
+                self.last_refresh_total_len = total_len
+                self.tokens_processed = max(total_len - self.max_capacity_prompt, 0)
+            else:
+                if self.compressed_keys is None or self.compressed_values is None:
+                    empty = key_states[:, :, :0, :]
+                    self.compressed_keys = empty
+                    self.compressed_values = value_states[:, :, :0, :]
+                if token_budget > 0:
+                    self.compressed_keys = self.compressed_keys[:, :, :token_budget, :]
+                    self.compressed_values = self.compressed_values[:, :, :token_budget, :]
+
+            key_states = torch.cat([self.compressed_keys, k_cur], dim=2)
+            value_states = torch.cat([self.compressed_values, v_cur], dim=2)
 
         return key_states, value_states
+
+
+def overwrite_past_key_value(past_key_value, layer_idx: int, key_states: torch.Tensor, value_states: torch.Tensor):
+    if hasattr(past_key_value, "key_cache") and hasattr(past_key_value, "value_cache"):
+        past_key_value.key_cache[layer_idx] = key_states
+        past_key_value.value_cache[layer_idx] = value_states
+        return
+
+    if hasattr(past_key_value, "layers"):
+        layer = past_key_value.layers[layer_idx]
+        if hasattr(layer, "keys") and hasattr(layer, "values"):
+            layer.keys = key_states
+            layer.values = value_states
+            return
+        if hasattr(layer, "key_cache") and hasattr(layer, "value_cache"):
+            layer.key_cache = key_states
+            layer.value_cache = value_states
+            return
+
+    raise AttributeError("Unsupported cache structure for overwriting compressed KV states")
 
 def init_clusterkv(self):
     if not hasattr(self, "kv_cluster"):
@@ -755,6 +956,18 @@ def init_clusterkv(self):
             self.config.num_block = 12
         if not hasattr(self.config, 'theta'):
             self.config.theta = 0.0
+        if not hasattr(self.config, 'n_future_positions'):
+            self.config.n_future_positions = 512
+        if not hasattr(self.config, 'n_sink'):
+            self.config.n_sink = 4
+        if not hasattr(self.config, 'use_covariance'):
+            self.config.use_covariance = True
+        if not hasattr(self.config, 'use_vnorm'):
+            self.config.use_vnorm = True
+        if not hasattr(self.config, 'epsilon'):
+            self.config.epsilon = 0.0
+        if not hasattr(self.config, 'hidden_states_buffer_size'):
+            self.config.hidden_states_buffer_size = 128
 
     self.kv_cluster = ClusterKVCache(
         n_clusters=self.config.n_clusters,
@@ -769,4 +982,10 @@ def init_clusterkv(self):
         clustering_backend=self.config.clustering_backend,
         num_block=self.config.num_block,
         theta=self.config.theta,
+        n_future_positions=self.config.n_future_positions,
+        n_sink=self.config.n_sink,
+        use_covariance=self.config.use_covariance,
+        use_vnorm=self.config.use_vnorm,
+        epsilon=self.config.epsilon,
+        hidden_states_buffer_size=self.config.hidden_states_buffer_size,
     )

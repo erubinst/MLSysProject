@@ -2,10 +2,13 @@
   "window_size": 64,
   "max_capacity_prompt": 4096,
   "page_size": 16,
-  "update_policy": "static",
+  "update_policy": "incremental",
   "update_interval": 100,
   "n_clusters": 128,
   "ranking_backend": "random",
   "observation_window": 32,
-  "selection_granularity": "token"
+  "selection_granularity": "clusterattn",
+  "clustering_backend": "kmeanspp",
+  "num_block": 12,
+  "theta": 0.0005
 }

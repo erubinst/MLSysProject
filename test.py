@@ -155,6 +155,46 @@ METHODS = {
         ],
         "model_name": "mistral-7B-instruct-v0.2clusterattn_random_static_c4096_w64_p16",
     },
+    "clusterattn_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterattn_snapkv_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterattn_dynamic_c4096_w64_p16",
+    },
+    "clusterattn_quest_bounds_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterattn_quest_bounds_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterattn_quest_bounds_dynamic_c4096_w64_p16",
+    },
+    "clusterattn_h2o_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterattn_h2o_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterattn_h2o_dynamic_c4096_w64_p16",
+    },
+    "clusterattn_expected_attention_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterattn_expected_attention_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterattn_expected_attention_dynamic_c4096_w64_p16",
+    },
+    "clusterattn_random_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "clusterattn_random_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2clusterattn_random_dynamic_c4096_w64_p16",
+    },
     "clusterkv_quest_bounds_static": {
         "script": "pred_snap.py",
         "extra_args": [
@@ -347,6 +387,38 @@ METHODS = {
         ],
         "model_name": "mistral-7B-instruct-v0.2pagekv_random_c4096_w64_p16",
     },
+    "pagekv_quest_bounds_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "pagekv_quest_bounds_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2pagekv_quest_bounds_dynamic_c4096_w64_p16",
+    },
+    "pagekv_h2o_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "pagekv_h2o_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2pagekv_h2o_dynamic_c4096_w64_p16",
+    },
+    "pagekv_expected_attention_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "pagekv_expected_attention_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2pagekv_expected_attention_dynamic_c4096_w64_p16",
+    },
+    "pagekv_random_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "pagekv_random_dynamic_c4096_w64_p16.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2pagekv_random_dynamic_c4096_w64_p16",
+    },
     "tokenkv_quest_bounds_static": {
         "script": "pred_snap.py",
         "extra_args": [
@@ -394,6 +466,38 @@ METHODS = {
             "--compress_args_path", "tokenkv_random_c4096_w64.json",
         ],
         "model_name": "mistral-7B-instruct-v0.2tokenkv_random_c4096_w64",
+    },
+    "tokenkv_quest_bounds_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_quest_bounds_dynamic_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_quest_bounds_dynamic_c4096_w64",
+    },
+    "tokenkv_h2o_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_h2o_dynamic_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_h2o_dynamic_c4096_w64",
+    },
+    "tokenkv_expected_attention_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_expected_attention_dynamic_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_expected_attention_dynamic_c4096_w64",
+    },
+    "tokenkv_random_dynamic": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_random_dynamic_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_random_dynamic_c4096_w64",
     },
     "h2o_static": {
         "script": "pred_h2o.py",
@@ -779,6 +883,11 @@ def generate_csv(run_tag: str):
         "clusterattn_recon_static",
         "clusterattn_expected_attention_static",
         "clusterattn_random_static",
+        "clusterattn_dynamic",
+        "clusterattn_quest_bounds_dynamic",
+        "clusterattn_h2o_dynamic",
+        "clusterattn_expected_attention_dynamic",
+        "clusterattn_random_dynamic",
         "clusterkv_quest_bounds_static",
         "clusterkv_quest_bounds_kmeans_static",
         "clusterkv_quest_bounds_spherical_static",
@@ -803,12 +912,20 @@ def generate_csv(run_tag: str):
         "pagekv_recon_static",
         "pagekv_expected_attention_static",
         "pagekv_random_static",
+        "pagekv_quest_bounds_dynamic",
+        "pagekv_h2o_dynamic",
+        "pagekv_expected_attention_dynamic",
+        "pagekv_random_dynamic",
         "tokenkv_quest_bounds_static",
         "tokenkv_snapkv_static",
         "tokenkv_h2o_static",
         "tokenkv_recon_static",
         "tokenkv_expected_attention_static",
         "tokenkv_random_static",
+        "tokenkv_quest_bounds_dynamic",
+        "tokenkv_h2o_dynamic",
+        "tokenkv_expected_attention_dynamic",
+        "tokenkv_random_dynamic",
         "h2o_static",
         "ack",
     ]:
@@ -1017,6 +1134,30 @@ def main_eval_single(run_tag: str):
     method = "baseline"
     dataset = "hotpotqa"
     run_eval.spawn(method, dataset, run_tag)
+
+
+@app.local_entrypoint()
+def main_method(method: str, version: str = "1", run_tag: str = ""):
+    """Run any single registered method across all datasets."""
+    if method not in METHODS:
+        raise ValueError(f"Unknown method: {method}")
+    _submit_inference_methods([method], version, run_tag)
+
+
+@app.local_entrypoint()
+def main_eval_method(method: str, run_tag: str):
+    """Eval any single registered method across all datasets."""
+    if method not in METHODS:
+        raise ValueError(f"Unknown method: {method}")
+    _submit_eval_methods([method], run_tag)
+
+
+@app.local_entrypoint()
+def main_validate_method(method: str, version: str = "1", run_tag: str = ""):
+    """Run one-example validation for any single registered method."""
+    if method not in METHODS:
+        raise ValueError(f"Unknown method: {method}")
+    _submit_validation_methods([method], version, run_tag)
 
 
 # Convenience entrypoints for methods you've already run

@@ -2,10 +2,13 @@
   "window_size": 64,
   "max_capacity_prompt": 4096,
   "page_size": 16,
-  "update_policy": "static",
+  "update_policy": "incremental",
   "update_interval": 100,
   "n_clusters": 128,
   "ranking_backend": "h2o_accum",
   "observation_window": 64,
-  "selection_granularity": "page"
+  "selection_granularity": "clusterattn",
+  "clustering_backend": "kmeanspp",
+  "num_block": 12,
+  "theta": 0.0005
 }

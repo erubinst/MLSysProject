@@ -13,7 +13,7 @@ from transformers.utils import (
     logging,
     is_flash_attn_2_available,
 )
-from snapkv.monkeypatch.clusterkv_utils import init_clusterkv
+from snapkv.monkeypatch.clusterkv_utils import init_clusterkv, overwrite_past_key_value
 
 logger = logging.get_logger(__name__)
 
@@ -67,6 +67,7 @@ def mixtral_flash_attn2_forward(
         else:
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
 
+    query_states_pre_rope = query_states
     cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
 
@@ -78,11 +79,32 @@ def mixtral_flash_attn2_forward(
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
         if key_states.shape[-2] == kv_seq_len: # [ClusterKV] add kv_cluster
             self.kv_seq_len = kv_seq_len # [ClusterKV] register kv_seq_len
-            key_states_compress, value_states_compress = self.kv_cluster.update_kv(key_states, query_states, value_states, attention_mask, self.num_key_value_groups)
+            key_states_compress, value_states_compress = self.kv_cluster.update_kv(
+                key_states,
+                query_states,
+                value_states,
+                attention_mask,
+                self.num_key_value_groups,
+                pre_rope_query_states=query_states_pre_rope,
+                layer_module=self,
+                total_seq_len=kv_seq_len,
+            )
             past_key_value.update(key_states_compress, value_states_compress, self.layer_idx, cache_kwargs)
         else:
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            if self.kv_cluster.update_policy != "static":
+                key_states, value_states = self.kv_cluster.update_kv(
+                    key_states,
+                    query_states,
+                    value_states,
+                    attention_mask,
+                    self.num_key_value_groups,
+                    pre_rope_query_states=query_states_pre_rope,
+                    layer_module=self,
+                    total_seq_len=self.kv_seq_len,
+                )
+                overwrite_past_key_value(past_key_value, self.layer_idx, key_states, value_states)
 
     query_states = query_states.transpose(1, 2)
     key_states = key_states.transpose(1, 2)

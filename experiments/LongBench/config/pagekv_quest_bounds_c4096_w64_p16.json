@@ -2,7 +2,7 @@
   "window_size": 64,
   "max_capacity_prompt": 4096,
   "page_size": 16,
-  "update_policy": "incremental",
+  "update_policy": "static",
   "update_interval": 100,
   "n_clusters": 128,
   "ranking_backend": "quest_bounds",

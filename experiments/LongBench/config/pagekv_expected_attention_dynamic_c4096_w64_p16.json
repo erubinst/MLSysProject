@@ -1,0 +1,17 @@
+{
+  "window_size": 64,
+  "max_capacity_prompt": 4096,
+  "page_size": 16,
+  "update_policy": "periodic",
+  "update_interval": 10,
+  "n_clusters": 128,
+  "ranking_backend": "expected_attention",
+  "observation_window": 32,
+  "selection_granularity": "page",
+  "n_future_positions": 512,
+  "n_sink": 4,
+  "use_covariance": true,
+  "use_vnorm": true,
+  "epsilon": 0.0,
+  "hidden_states_buffer_size": 128
+}
