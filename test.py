@@ -616,7 +616,7 @@ def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset
 @app.function(
     image=image,
     volumes={"/models": volume},
-    timeout=600
+    timeout=1800
 )
 def submit_inference_batch(methods: list[str], run_tag: str):
     submitted = 0
@@ -632,7 +632,7 @@ def submit_inference_batch(methods: list[str], run_tag: str):
 @app.function(
     image=image,
     volumes={"/models": volume},
-    timeout=600
+    timeout=1800
 )
 def submit_eval_batch(methods: list[str], run_tag: str):
     submitted = 0
@@ -648,7 +648,7 @@ def submit_eval_batch(methods: list[str], run_tag: str):
 @app.function(
     image=image,
     volumes={"/models": volume},
-    timeout=600
+    timeout=1800
 )
 def submit_validation_batch(methods: list[str], run_tag: str, dataset: str = VALIDATION_DATASET, sample_offset: int = VALIDATION_SAMPLE_OFFSET):
     submitted = 0
