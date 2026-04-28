@@ -398,6 +398,41 @@ Examples:
 |---|---:|---:|---:|---:|---:|---:|---:|
 | quest | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 |  |  |
 
+### Current benchmark snapshot
+
+Best current compressed method:
+- `clusterattn_recon_static`
+- Average score: `40.56` vs baseline `41.12`
+- Peak GPU: `21.87 GB` vs baseline `25.93 GB` for a `15.7%` reduction
+- KV cache: `8,071.6 MB` vs baseline `12,223.1 MB` for a `34.0%` reduction
+- Average latency: `5.374 s` vs baseline `7.733 s` for a `30.5%` reduction
+- Profiled TFLOPs: `169.579216` vs baseline `169.639661` with no meaningful reduction
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 25.93 | 12223.1 | 7.733 | 15.6 | 169.639661 | 7.041622 |
+| snapkv_static | 30.52 | 42.31 | 55.98 | 33.38 | 40.55 | 21.87 | 8071.6 | 6.017 | 14.6 | 169.902572 | 4.928252 |
+| quest_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 21.87 | 8071.6 | 5.396 | 17.25 | 170.151672 | 7.350395 |
+| clusterattn_static | 30.3 | 42.69 | 55.82 | 33.19 | 40.5 | 21.87 | 8071.6 | 7.856 | 13.9 | 170.492271 | 4.64913 |
+| clusterattn_quest_bounds_static | 30.52 | 42.17 | 55.58 | 33.53 | 40.45 | 21.87 | 8071.6 | 5.552 | 17.3 | 170.336097 | 4.833747 |
+| clusterattn_snapkv_static | 30.3 | 42.69 | 55.82 | 33.19 | 40.5 | 21.87 | 8071.6 | 7.834 | 13.38 | 170.492271 | 4.747719 |
+| clusterattn_h2o_static | 29.98 | 40.33 | 55.86 | 32.27 | 39.61 | 21.87 | 8071.6 | 5.569 | 17.09 | 169.74129 | 5.114582 |
+| clusterattn_recon_static | 30.48 | 42.1 | 56.21 | 33.47 | 40.56 | 21.87 | 8071.6 | 5.374 | 18.24 | 169.579216 | 5.083752 |
+| clusterattn_expected_attention_static | 30.16 | 42.12 | 55.78 | 32.48 | 40.13 | 21.87 | 8071.6 | 5.298 | 16.75 | 169.827199 | 5.472103 |
+| clusterattn_random_static | 22.13 | 23.45 | 54.88 | 28.9 | 32.34 | 21.87 | 8071.6 | 8.309 | 15.88 | 170.624572 | 5.295625 |
+| pagekv_quest_bounds_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 21.87 | 8071.6 | 5.574 | 16.84 | 170.151672 | 6.64543 |
+| pagekv_snapkv_static | 30.91 | 42.4 | 55.68 | 32.93 | 40.48 | 21.87 | 8071.6 | 6.915 | 14.42 | 170.481604 | 7.693576 |
+| pagekv_h2o_static | 29.92 | 42.64 | 55.63 | 32.47 | 40.16 | 21.87 | 8071.6 | 4.974 | 18.73 | 170.49864 | 6.861369 |
+| pagekv_recon_static | 29.45 | 37.78 | 56.01 | 30.24 | 38.37 | 21.87 | 8071.6 | 8.015 | 14.98 | 170.56057 | 6.746171 |
+| pagekv_expected_attention_static | 29.45 | 42.32 | 55.56 | 32.05 | 39.84 | 21.87 | 8071.6 | 4.864 | 17.26 | 169.674306 | 6.91476 |
+| pagekv_random_static | 24.02 | 28.36 | 54.52 | 31.14 | 34.51 | 21.87 | 8071.6 | 7.556 | 17.37 | 170.631683 | 7.261989 |
+| tokenkv_quest_bounds_static | 29.76 | 41.91 | 55.82 | 32.97 | 40.12 | 21.87 | 8071.6 | 6.873 | 14.34 | 170.318319 | 6.544338 |
+| tokenkv_snapkv_static | 30.34 | 42.52 | 55.79 | 33.01 | 40.41 | 21.87 | 8071.6 | 6.654 | 17.07 | 170.531383 | 9.015235 |
+| tokenkv_h2o_static | 30.03 | 40.08 | 55.86 | 32.27 | 39.56 | 21.87 | 8071.6 | 4.818 | 19.54 | 169.74129 | 9.276461 |
+| tokenkv_recon_static | 30.48 | 42.1 | 56.21 | 33.47 | 40.56 | 21.87 | 8071.6 | 5.396 | 17.56 | 169.579216 | 7.467223 |
+| tokenkv_expected_attention_static | 30.51 | 41.95 | 55.91 | 32.98 | 40.34 | 21.87 | 8071.6 | 5.087 | 18.6 | 170.186318 | 7.548452 |
+| tokenkv_random_static | 22.13 | 23.45 | 54.88 | 28.9 | 32.34 | 21.87 | 8071.6 | 6.889 | 16.75 | 170.624572 | 6.89309 |
+
 ## Deliverables
 - GitHub repository containing ClusterKV and experiment scripts
 - CSV logs of metrics
