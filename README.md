@@ -322,7 +322,6 @@ Status: `done`
 ### Dynamic methods currently implemented
 
 ClusterAttn dynamic:
-- `clusterattn_dynamic`
 - `clusterattn_quest_bounds_dynamic`
 - `clusterattn_h2o_dynamic`
 - `clusterattn_expected_attention_dynamic`

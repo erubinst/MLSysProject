@@ -58,6 +58,21 @@ STATIC_METHODS = [
     "tokenkv_random_static",
 ]
 
+DYNAMIC_METHODS = [
+    "clusterattn_quest_bounds_dynamic",
+    "clusterattn_h2o_dynamic",
+    "clusterattn_expected_attention_dynamic",
+    "clusterattn_random_dynamic",
+    "pagekv_quest_bounds_dynamic",
+    "pagekv_h2o_dynamic",
+    "pagekv_expected_attention_dynamic",
+    "pagekv_random_dynamic",
+    "tokenkv_quest_bounds_dynamic",
+    "tokenkv_h2o_dynamic",
+    "tokenkv_expected_attention_dynamic",
+    "tokenkv_random_dynamic",
+]
+
 
 def _build_run_tag(version: str = "1", run_tag: str = "") -> str:
     if run_tag:
@@ -154,14 +169,6 @@ METHODS = {
             "--compress_args_path", "clusterattn_random_c4096_w64_p16.json",
         ],
         "model_name": "mistral-7B-instruct-v0.2clusterattn_random_static_c4096_w64_p16",
-    },
-    "clusterattn_dynamic": {
-        "script": "pred_snap.py",
-        "extra_args": [
-            "--method", "clusterkv",
-            "--compress_args_path", "clusterattn_snapkv_dynamic_c4096_w64_p16.json",
-        ],
-        "model_name": "mistral-7B-instruct-v0.2clusterattn_dynamic_c4096_w64_p16",
     },
     "clusterattn_quest_bounds_dynamic": {
         "script": "pred_snap.py",
@@ -903,7 +910,6 @@ def generate_csv(run_tag: str):
         "clusterattn_recon_static",
         "clusterattn_expected_attention_static",
         "clusterattn_random_static",
-        "clusterattn_dynamic",
         "clusterattn_quest_bounds_dynamic",
         "clusterattn_h2o_dynamic",
         "clusterattn_expected_attention_dynamic",
@@ -1151,6 +1157,30 @@ def main_verify_eval(run_tag: str):
 def main_validate_all_static(version: str = "1", run_tag: str = ""):
     """Run one-example validation for all current static methods."""
     _submit_validation_methods(STATIC_METHODS, version, run_tag)
+
+
+@app.local_entrypoint()
+def main_dynamic(version: str = "1", run_tag: str = ""):
+    """Run inference for all current dynamic methods and datasets via a remote orchestrator."""
+    _submit_inference_methods(DYNAMIC_METHODS, version, run_tag)
+
+
+@app.local_entrypoint()
+def main_eval_all_dynamic(run_tag: str):
+    """Score all completed dynamic-method inference runs via a remote orchestrator."""
+    _submit_eval_methods(DYNAMIC_METHODS, run_tag)
+
+
+@app.local_entrypoint()
+def main_verify_eval_dynamic(run_tag: str):
+    """Check whether all dynamic-method eval artifacts exist for the given run."""
+    verify_eval_complete.spawn(run_tag, DYNAMIC_METHODS)
+
+
+@app.local_entrypoint()
+def main_validate_all_dynamic(version: str = "1", run_tag: str = ""):
+    """Run one-example validation for all current dynamic methods."""
+    _submit_validation_methods(DYNAMIC_METHODS, version, run_tag)
 
 @app.local_entrypoint()
 def main_validate_single(version: str = "1", run_tag: str = ""):
