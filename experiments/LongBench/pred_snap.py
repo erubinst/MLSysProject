@@ -27,7 +27,7 @@ def parse_args(args=None):
         "internlm-7b-8k", "chatglm2-6b", "chatglm2-6b-32k", "chatglm3-6b-32k", "vicuna-v1.5-7b-16k",
         "mistral-7B-instruct-v0.2", "mistral-7B-instruct-v0.1", "llama-2-7B-32k-instruct", "mixtral-8x7B-instruct-v0.1","lwm-text-chat-1m", "lwm-text-1m"])
     parser.add_argument('--compress_args_path', type=str, default=None, help="Path to the compress args")
-    parser.add_argument('--method', type=str, default='snapkv', choices=['snapkv', 'quest', 'clusterkv'],
+    parser.add_argument('--method', type=str, default='snapkv', choices=['snapkv', 'quest', 'clusterkv', 'heuristic_routing'],
                         help="Compression method to enable when --compress_args_path is provided")
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('--dataset', type=str, default='qasper', help="Dataset to evaluate on")
@@ -68,6 +68,82 @@ def post_process(response, model_name):
         response = response.split("<eoa>")[0]
     return response
 
+HEURISTIC_ROUTING_CONFIGS = {
+    "tokenkv_quest_bounds_dynamic100": {
+        "method": "clusterkv",
+        "compress_args_path": "tokenkv_quest_bounds_dynamic100_c4096_w64.json",
+    },
+    "tokenkv_quest_bounds_static": {
+        "method": "clusterkv",
+        "compress_args_path": "tokenkv_quest_bounds_c4096_w64.json",
+    },
+    "clusterattn_recon_static": {
+        "method": "clusterkv",
+        "compress_args_path": "clusterattn_recon_c4096_w64_p16.json",
+    },
+    "clusterattn_quest_bounds_static": {
+        "method": "clusterkv",
+        "compress_args_path": "clusterattn_quest_bounds_c4096_w64_p16.json",
+    },
+    "pagekv_quest_bounds_static": {
+        "method": "clusterkv",
+        "compress_args_path": "pagekv_quest_bounds_c4096_w64_p16.json",
+    },
+}
+
+CODE_MARKERS = (
+    "def ", "class ", "import ", "from ", "return ", "self.", "->", "::",
+    "();", "</", "#include", "public ", "private ",
+)
+SUMMARY_MARKERS = (
+    "summary:", "summarize", "write a summary", "write a one-page summary",
+)
+QA_MARKERS = (
+    "question:", "answer:", "passage", "given passages", "given a scientific article",
+)
+
+def choose_heuristic_route(prompt: str, max_gen: int):
+    sample = (prompt[:512] + "\n" + prompt[-512:]).lower()
+    code_hits = sum(marker in sample for marker in CODE_MARKERS)
+    has_summary = any(marker in sample for marker in SUMMARY_MARKERS)
+    has_qa = any(marker in sample for marker in QA_MARKERS)
+
+    if max_gen >= 256 or has_summary:
+        route = "tokenkv_quest_bounds_dynamic100"
+        reason = "long_or_summary"
+    elif code_hits >= 2:
+        route = "clusterattn_recon_static"
+        reason = "code_markers"
+    elif has_qa and max_gen >= 128:
+        route = "clusterattn_quest_bounds_static"
+        reason = "qa_medium_long"
+    elif has_qa:
+        route = "pagekv_quest_bounds_static"
+        reason = "qa_short"
+    else:
+        route = "clusterattn_recon_static"
+        reason = "fallback"
+    return route, reason
+
+def apply_clusterkv_config(model, compress_args):
+    layers = len(model.model.layers)
+    for i in range(layers):
+        cfg = model.model.layers[i].self_attn.config
+        cfg.window_size = compress_args.get("window_size")
+        cfg.max_capacity_prompt = compress_args.get("max_capacity_prompt")
+        cfg.page_size = compress_args.get("page_size")
+        cfg.update_policy = compress_args.get("update_policy")
+        cfg.update_interval = compress_args.get("update_interval")
+        cfg.n_clusters = compress_args.get("n_clusters")
+        cfg.ranking_backend = compress_args.get("ranking_backend")
+        cfg.observation_window = compress_args.get("observation_window")
+        cfg.selection_granularity = compress_args.get("selection_granularity")
+        cfg.clustering_backend = compress_args.get("clustering_backend")
+        if "num_block" in compress_args:
+            cfg.num_block = compress_args.get("num_block")
+        if "theta" in compress_args:
+            cfg.theta = compress_args.get("theta")
+
 @torch.inference_mode()
 def get_pred_single_gpu(data, max_length, max_gen,
                         prompt_format, dataset, model_name,
@@ -89,7 +165,8 @@ def get_pred_single_gpu(data, max_length, max_gen,
                         selection_granularity=None,
                         clustering_backend=None,
                         num_block=None,
-                        theta=None):
+                        theta=None,
+                        routing_configs=None):
     model, tokenizer = load_model_and_tokenizer(model2path[model_name], model_name, device="cuda", compress=compress)
     device = model.device
 
@@ -105,13 +182,16 @@ def get_pred_single_gpu(data, max_length, max_gen,
     prefill_latencies_s = []
     decode_latencies_s = []
     generated_tokens = []
+    routing_counts = {}
     profiled_flops = None
     profiled_latency_s = None
 
     for idx, json_obj in enumerate(tqdm(data)):
         if compress:
             layers = len(model.model.layers)
-            if method == 'snapkv':
+            if method == 'heuristic_routing':
+                pass
+            elif method == 'snapkv':
                 if not isinstance(window_sizes, list):
                     window_sizes = [window_sizes] * layers
                 if not isinstance(max_capacity_prompts, list):
@@ -145,6 +225,14 @@ def get_pred_single_gpu(data, max_length, max_gen,
                 raise ValueError(f"Compression method {method} not supported")
 
         prompt = prompt_format.format(**json_obj)
+        if compress and method == 'heuristic_routing':
+            route, route_reason = choose_heuristic_route(prompt, max_gen)
+            route_cfg = routing_configs[route]
+            apply_clusterkv_config(model, route_cfg["compress_args"])
+            routing_counts[route] = routing_counts.get(route, 0) + 1
+            if idx < 5:
+                print(f"HEURISTIC_ROUTE example={idx} route={route} reason={route_reason} max_gen={max_gen}")
+
         tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt").input_ids[0]
         if "chatglm3" in model_name:
             tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt", add_special_tokens=False).input_ids[0]
@@ -273,6 +361,8 @@ def get_pred_single_gpu(data, max_length, max_gen,
         print(f"Profiled TFLOPs (1st example): {profiled_tflops:.6f}")
     if profiled_tflops_per_s is not None:
         print(f"Profiled TFLOPs/s (1st example): {profiled_tflops_per_s:.6f}")
+    if routing_counts:
+        print(f"Heuristic route counts:        {json.dumps(routing_counts, sort_keys=True)}")
     print(f"{'='*50}\n")
 
 
@@ -346,7 +436,22 @@ if __name__ == '__main__':
         os.makedirs("pred_e")
 
     dataset = args.dataset
-    if args.compress_args_path:
+    routing_configs = None
+    if args.method == "heuristic_routing":
+        compress = True
+        compress_args = {}
+        write_model_name = args.write_model_name or (model_name + "heuristic_routing")
+        routing_configs = {}
+        for route_name, route_spec in HEURISTIC_ROUTING_CONFIGS.items():
+            with open(os.path.join("config", route_spec["compress_args_path"]), "r") as f:
+                routing_configs[route_name] = {
+                    "method": route_spec["method"],
+                    "compress_args": json.load(f),
+                }
+        replace_llama_cluster()
+        replace_mistral_cluster()
+        replace_mixtral_cluster()
+    elif args.compress_args_path:
         compress_args = json.load(open(os.path.join('config', args.compress_args_path), "r"))
         compress = True
         write_model_name = args.write_model_name or (model_name + args.compress_args_path.split(".")[0])
@@ -391,7 +496,7 @@ if __name__ == '__main__':
     if compress_args is not None:
         get_pred_single_gpu(
             data_all, max_length, max_gen, prompt_format, dataset, model_name,
-            model2path, out_path, compress, args.method, **compress_args
+            model2path, out_path, compress, args.method, routing_configs=routing_configs, **compress_args
         )
     else:
         get_pred_single_gpu(

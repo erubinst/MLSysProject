@@ -104,6 +104,7 @@ This is the recommended way to submit longer inference or evaluation jobs.
 | Owner | Version | Scope | Run Tag | Link |
 | --- | --- | --- | --- | --- |
 | Michael | `1` | all static methods | `v1_20260427_030527` | [ap-7D5pMzxNUjZkXQWrnUoZpS](https://modal.com/apps/huxinyu1997/main/ap-7D5pMzxNUjZkXQWrnUoZpS) |
+| Michael | `3` | heuristic routing | `v3_20260501_013635` | [ap-rbfehVDnVXvKYjy8Ut08V4](https://modal.com/apps/huxinyu1997/main/ap-rbfehVDnVXvKYjy8Ut08V4) |
 
 ## Versioned Runs
 All Modal artifacts are now versioned.
@@ -155,6 +156,35 @@ You can also set the tag directly:
 
 ```bash
 modal run --detach test.py::main_tokenkv_h2o_static --run-tag v7_custom
+```
+
+## Routed Heuristic Experiment
+`heuristic_routing` is a single experiment label that routes each example to a backend using only fixed-cost prompt-window keyword checks plus the configured `max_gen`.
+
+It does not use the dataset name to choose the backend. Dataset labels are used only by the LongBench runner to select which split to evaluate.
+
+Current label-free route:
+- If `max_gen >= 256` or summary markers appear, use `tokenkv_quest_bounds_dynamic100`.
+- Else if sampled prompt windows look code-like, use `clusterattn_recon_static`.
+- Else if sampled prompt windows look QA-like and `max_gen >= 128`, use `clusterattn_quest_bounds_static`.
+- Else if sampled prompt windows look QA-like, use `pagekv_quest_bounds_static`.
+- Else use `clusterattn_recon_static`.
+
+The prompt check samples the first and last prompt windows, so the routing overhead is fixed-cost rather than an `O(n)` scan over the full context. Inference logs print the first few per-example route decisions and a final route-count summary.
+
+Run and evaluate it across all configured datasets:
+
+```bash
+modal run --detach test.py::main_heuristic_routing --version 3
+modal run --detach test.py::main_eval_heuristic_routing --run-tag v3_20260501_013635
+modal run --detach test.py::main_verify_eval_heuristic_routing --run-tag v3_20260501_013635
+modal run --detach test.py::main_csv --run-tag v3_20260501_013635
+```
+
+One-example validation:
+
+```bash
+modal run --detach test.py::main_validate_heuristic_routing --version 1
 ```
 
 ## One-Example Validation
@@ -335,9 +365,13 @@ PageKV dynamic:
 
 TokenKV dynamic:
 - `tokenkv_quest_bounds_dynamic`
+- `tokenkv_quest_bounds_dynamic100`
 - `tokenkv_h2o_dynamic`
 - `tokenkv_expected_attention_dynamic`
 - `tokenkv_random_dynamic`
+
+### Routed heuristic methods
+- `heuristic_routing`
 
 ### Dynamic coverage summary
 - Dynamic variants exist for:
@@ -476,6 +510,67 @@ Best current compressed method:
 | tokenkv_recon_static | 30.48 | 42.1 | 56.21 | 33.47 | 40.56 | 21.87 | 8071.6 | 5.396 | 17.56 | 169.579216 | 7.467223 |
 | tokenkv_expected_attention_static | 30.51 | 41.95 | 55.91 | 32.98 | 40.34 | 21.87 | 8071.6 | 5.087 | 18.6 | 170.186318 | 7.548452 |
 | tokenkv_random_static | 22.13 | 23.45 | 54.88 | 28.9 | 32.34 | 21.87 | 8071.6 | 6.889 | 16.75 | 170.624572 | 6.89309 |
+
+### Dynamic benchmark snapshot
+
+Current dynamic takeaways:
+- Dynamic does not help uniformly.
+- On the two tasks where dynamic was expected to matter most, `gov_report` and `qasper`, only `tokenkv_quest_bounds_dynamic` clearly helps relative to its static counterpart:
+  - `gov_report`: `29.91` vs `29.76`
+  - `qasper`: `33.22` vs `32.97`
+- `tokenkv_h2o_dynamic` is close to static on `qasper` (`32.26` vs `32.27`) but still loses on `gov_report` (`28.62` vs `30.03`).
+- `pagekv_*_dynamic` and `clusterattn_*_dynamic` regress strongly on `gov_report` and `qasper`, especially the `h2o` variants.
+- On `hotpotqa` and `lcc`, dynamic usually does not help either; the best behavior is near-parity from `tokenkv_quest_bounds_dynamic` and `tokenkv_h2o_dynamic`.
+- The current dynamic implementation is also much more memory-hungry than the static one:
+  - static compressed methods were around `21.87 GB` peak GPU and `8071.6 MB` KV cache
+  - dynamic runs are around `33.4 GB` peak GPU and `19.9 GB` KV cache for most methods
+- `expected_attention_dynamic` rows are still incomplete in the current CSV and should not be interpreted yet.
+
+Task-by-task comparison against static counterparts:
+- `gov_report`
+  - `tokenkv_quest_bounds_dynamic`: `+0.15`
+  - `tokenkv_h2o_dynamic`: `-1.41`
+  - `pagekv_quest_bounds_dynamic`: `-7.55`
+  - `pagekv_h2o_dynamic`: `-13.63`
+  - `clusterattn_h2o_dynamic`: `-16.38`
+- `qasper`
+  - `tokenkv_quest_bounds_dynamic`: `+0.25`
+  - `tokenkv_h2o_dynamic`: `-0.01`
+  - `pagekv_quest_bounds_dynamic`: `-1.54`
+  - `pagekv_h2o_dynamic`: `-2.59`
+  - `clusterattn_quest_bounds_dynamic`: `-9.83`
+  - `clusterattn_h2o_dynamic`: `-14.58`
+- `hotpotqa`
+  - `tokenkv_quest_bounds_dynamic`: `0.00`
+  - `tokenkv_h2o_dynamic`: `-0.25`
+  - `pagekv_quest_bounds_dynamic`: `-1.04`
+  - `clusterattn_quest_bounds_dynamic`: `-0.96`
+- `lcc`
+  - `tokenkv_quest_bounds_dynamic`: `-0.23`
+  - `tokenkv_h2o_dynamic`: `-0.30`
+  - `pagekv_quest_bounds_dynamic`: `-0.19`
+  - `clusterattn_quest_bounds_dynamic`: `-1.76`
+
+Interpretation:
+- If dynamic is kept at all, `tokenkv_quest_bounds_dynamic` is the strongest current candidate.
+- `tokenkv_h2o_dynamic` is the next most defensible dynamic baseline, but it does not beat its static version.
+- The page-level and ClusterAttn dynamic variants are currently not competitive on the long summarization / retrieval-heavy tasks that motivated dynamic updates.
+- The current `Throughput (tok/s)` column should be treated carefully because it is computed from generated tokens divided by total end-to-end latency, not pure decode-only throughput.
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| clusterattn_quest_bounds_dynamic |  | 41.21 | 53.82 | 23.7 | 39.58 | 33.41 | 19883.6 | 10.424 | 0.996 | 9.427 | 2.159 | 183.146 | 2.59 | 125.675054 | 1.055184 |
+| clusterattn_h2o_dynamic | 13.6 | 35.15 | 52.78 | 17.69 | 29.8 | 33.41 | 19883.9 | 15.704 | 1.006 | 14.698 | 2.528 | 120.25 | 3.03 | 125.705012 | 1.344334 |
+| clusterattn_expected_attention_dynamic |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| clusterattn_random_dynamic |  | 24.84 | 54.31 | 30.75 | 36.63 | 33.4 | 19880.7 | 7.021 | 0.979 | 6.042 | 2.407 | 140.844 | 4.11 | 125.675063 | 1.561787 |
+| pagekv_quest_bounds_dynamic | 23.63 | 40.35 | 55.44 | 31.57 | 37.75 | 33.4 | 19876.2 | 2.628 | 0.857 | 1.772 | 2.038 | 30.852 | 8.63 | 125.675068 | 7.390223 |
+| pagekv_h2o_dynamic | 16.29 | 38.81 | 54.63 | 29.88 | 34.9 | 30.98 | 17403.6 | 2.664 | 1.228 | 1.436 | 1.91 | 17.598 | 5.77 | 187.252758 | 11.94751 |
+| pagekv_expected_attention_dynamic |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| pagekv_random_dynamic | 14.22 | 38.46 | 53.63 | 27.39 | 33.42 | 33.4 | 19879.4 | 2.362 | 0.84 | 1.522 | 1.906 | 23.451 | 10.53 | 125.675063 | 7.759915 |
+| tokenkv_quest_bounds_dynamic | 29.91 | 41.91 | 55.59 | 33.22 | 40.16 | 33.4 | 19881.4 | 2.403 | 0.828 | 1.575 | 1.907 | 28.442 | 8.96 | 125.697974 | 7.513029 |
+| tokenkv_h2o_dynamic | 28.62 | 39.83 | 55.56 | 32.26 | 39.07 | 33.4 | 19881.5 | 2.524 | 0.846 | 1.678 | 1.924 | 29.005 | 9.12 | 125.84253 | 7.723757 |
+| tokenkv_expected_attention_dynamic |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| tokenkv_random_dynamic | 20.83 | 24.84 | 54.31 | 30.75 | 32.68 | 33.4 | 19880.7 | 2.663 | 0.829 | 1.834 | 1.819 | 25.454 | 10.84 | 125.675063 | 8.507744 |
 
 ## Deliverables
 - GitHub repository containing ClusterKV and experiment scripts

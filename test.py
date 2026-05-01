@@ -73,7 +73,6 @@ DYNAMIC_METHODS = [
     "tokenkv_random_dynamic",
 ]
 
-
 def _build_run_tag(version: str = "1", run_tag: str = "") -> str:
     if run_tag:
         return run_tag
@@ -94,6 +93,14 @@ def _results_dir(run_tag: str) -> str:
 
 def _validations_dir(run_tag: str) -> str:
     return f"/models/runs/{run_tag}/validations"
+
+
+def _is_registered_method(method: str) -> bool:
+    return method in METHODS
+
+
+def _resolve_method_config(method: str, dataset: str | None = None):
+    return METHODS[method]
 
 METHODS = {
     "baseline": {
@@ -482,6 +489,14 @@ METHODS = {
         ],
         "model_name": "mistral-7B-instruct-v0.2tokenkv_quest_bounds_dynamic_c4096_w64",
     },
+    "tokenkv_quest_bounds_dynamic100": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "tokenkv_quest_bounds_dynamic100_c4096_w64.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2tokenkv_quest_bounds_dynamic100_c4096_w64",
+    },
     "tokenkv_h2o_dynamic": {
         "script": "pred_snap.py",
         "extra_args": [
@@ -511,6 +526,11 @@ METHODS = {
         "extra_args": ["--max_capacity_prompt", "2048", "--window_size", "32"],
         "model_name": "mistral-7B-instruct-v0.2h2o_static_budget2048",
     },
+    "heuristic_routing": {
+        "script": "pred_snap.py",
+        "extra_args": ["--method", "heuristic_routing"],
+        "model_name": "mistral-7B-instruct-v0.2heuristic_routing",
+    },
 }
 
 # ============================================================
@@ -527,7 +547,7 @@ METHODS = {
 def run_inference(method: str, dataset: str, run_tag: str):
     import subprocess, shutil, os, re, json
 
-    cfg = METHODS[method]
+    cfg = _resolve_method_config(method, dataset)
     cmd = [
         "python", cfg["script"],
         "--model", "mistral-7B-instruct-v0.2",
@@ -621,6 +641,7 @@ def run_inference(method: str, dataset: str, run_tag: str):
                 "dataset": dataset,
                 "script": cfg["script"],
                 "extra_args": cfg["extra_args"],
+                "routed_method": cfg.get("routed_method"),
                 "returncode": result.returncode,
             },
             f,
@@ -638,7 +659,7 @@ def run_inference(method: str, dataset: str, run_tag: str):
 def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset: int = VALIDATION_SAMPLE_OFFSET, run_tag: str = "unversioned"):
     import json, os, re, shutil, subprocess
 
-    cfg = METHODS[method]
+    cfg = _resolve_method_config(method, dataset)
     cmd = [
         "python", cfg["script"],
         "--model", "mistral-7B-instruct-v0.2",
@@ -690,6 +711,7 @@ def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset
         "dataset": dataset,
         "sample_offset": sample_offset,
         "command": cmd,
+        "routed_method": cfg.get("routed_method"),
         "ran_successfully": result.returncode == 0,
         "pred_file_found": record is not None,
     }
@@ -777,7 +799,7 @@ def submit_validation_batch(methods: list[str], run_tag: str, dataset: str = VAL
 def run_eval(method: str, dataset: str, run_tag: str):
     import subprocess, shutil, os, json
 
-    cfg = METHODS[method]
+    cfg = _resolve_method_config(method, dataset)
     model_name = cfg["model_name"]
     pred_dir = _predictions_dir(run_tag, method)
 
@@ -901,6 +923,7 @@ def generate_csv(run_tag: str):
 
     for method in [
         "baseline",
+        "heuristic_routing",
         "snapkv_static",
         "quest_static",
         "clusterattn_static",
@@ -1213,7 +1236,7 @@ def main_eval_single(run_tag: str):
 @app.local_entrypoint()
 def main_method(method: str, version: str = "1", run_tag: str = ""):
     """Run any single registered method across all datasets."""
-    if method not in METHODS:
+    if not _is_registered_method(method):
         raise ValueError(f"Unknown method: {method}")
     _submit_inference_methods([method], version, run_tag)
 
@@ -1221,17 +1244,49 @@ def main_method(method: str, version: str = "1", run_tag: str = ""):
 @app.local_entrypoint()
 def main_eval_method(method: str, run_tag: str):
     """Eval any single registered method across all datasets."""
-    if method not in METHODS:
+    if not _is_registered_method(method):
         raise ValueError(f"Unknown method: {method}")
     _submit_eval_methods([method], run_tag)
 
 
 @app.local_entrypoint()
+def main_verify_eval_method(method: str, run_tag: str):
+    """Check eval artifacts for any single registered method."""
+    if not _is_registered_method(method):
+        raise ValueError(f"Unknown method: {method}")
+    verify_eval_complete.spawn(run_tag, [method])
+
+
+@app.local_entrypoint()
 def main_validate_method(method: str, version: str = "1", run_tag: str = ""):
     """Run one-example validation for any single registered method."""
-    if method not in METHODS:
+    if not _is_registered_method(method):
         raise ValueError(f"Unknown method: {method}")
     _submit_validation_methods([method], version, run_tag)
+
+
+@app.local_entrypoint()
+def main_heuristic_routing(version: str = "1", run_tag: str = ""):
+    """Run routed heuristic inference across all datasets."""
+    _submit_inference_methods(["heuristic_routing"], version, run_tag)
+
+
+@app.local_entrypoint()
+def main_eval_heuristic_routing(run_tag: str):
+    """Eval routed heuristic predictions across all datasets."""
+    _submit_eval_methods(["heuristic_routing"], run_tag)
+
+
+@app.local_entrypoint()
+def main_verify_eval_heuristic_routing(run_tag: str):
+    """Check routed heuristic eval artifacts."""
+    verify_eval_complete.spawn(run_tag, ["heuristic_routing"])
+
+
+@app.local_entrypoint()
+def main_validate_heuristic_routing(version: str = "1", run_tag: str = ""):
+    """Run one-example validation for the routed heuristic."""
+    _submit_validation_methods(["heuristic_routing"], version, run_tag)
 
 
 # Convenience entrypoints for methods you've already run

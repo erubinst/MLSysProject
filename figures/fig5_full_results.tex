@@ -1,0 +1,56 @@
+\begin{table*}[t]
+\centering
+\small
+\caption{Full results across all configurations on LongBench. Accuracy metrics: F1 for \texttt{hotpotqa} and \texttt{qasper}, ROUGE-L for \texttt{gov\_report}, Edit Similarity for \texttt{lcc}. Dynamic methods marked \dag{} timed out; scores omitted. All compressed methods use a token budget of 4{,}096. Bold = best average accuracy among static compressed methods.}
+\label{tab:full_results}
+\begin{tabular}{llccccccccc}
+\toprule
+Method & Mode & gov\_report & hotpotqa & lcc & qasper & Avg & Lat (s) & Tput & TFLOPs \\
+\midrule
+\midrule
+\multicolumn{10}{l}{\textit{Baselines}} \\
+Full Precision & Baseline & 32.87 & 42.77 & 55.86 & 32.99 & 41.12 & 7.73 & 15.6 & 169.6 \\
+SnapKV & Static & 30.52 & 42.31 & 55.98 & 33.38 & 40.55 & 6.02 & 14.6 & 169.9 \\
+Quest & Static & 31.18 & 41.39 & 55.63 & 33.11 & 40.33 & 5.40 & 17.2 & 170.2 \\
+\midrule
+\multicolumn{10}{l}{\textit{Block-density granularity (static)}} \\
+ClusterAttn (snapkv) & Static & 30.30 & 42.69 & 55.82 & 33.19 & 40.50 & 7.86 & 13.9 & 170.5 \\
+ClusterAttn + Quest bounds & Static & 30.52 & 42.17 & 55.58 & 33.53 & 40.45 & 5.55 & 17.3 & 170.3 \\
+ClusterAttn + SnapKV & Static & 30.30 & 42.69 & 55.82 & 33.19 & 40.50 & 7.83 & 13.4 & 170.5 \\
+ClusterAttn + H2O & Static & 29.98 & 40.33 & 55.86 & 32.27 & 39.61 & 5.57 & 17.1 & 169.7 \\
+ClusterAttn + Recon & Static & 30.48 & 42.10 & 56.21 & 33.47 & \textbf{40.56} & 5.37 & 18.2 & 169.6 \\
+ClusterAttn + Exp. Attn & Static & 30.16 & 42.12 & 55.78 & 32.48 & 40.13 & 5.30 & 16.8 & 169.8 \\
+ClusterAttn + Random & Static & 22.13 & 23.45 & 54.88 & 28.90 & 32.34 & 8.31 & 15.9 & 170.6 \\
+\midrule
+\multicolumn{10}{l}{\textit{Page-level granularity (static)}} \\
+PageKV + Quest bounds & Static & 31.18 & 41.39 & 55.63 & 33.11 & 40.33 & 5.57 & 16.8 & 170.2 \\
+PageKV + SnapKV & Static & 30.91 & 42.40 & 55.68 & 32.93 & 40.48 & 6.92 & 14.4 & 170.5 \\
+PageKV + H2O & Static & 29.92 & 42.64 & 55.63 & 32.47 & 40.16 & 4.97 & 18.7 & 170.5 \\
+PageKV + Recon & Static & 29.45 & 37.78 & 56.01 & 30.24 & 38.37 & 8.02 & 15.0 & 170.6 \\
+PageKV + Exp. Attn & Static & 29.45 & 42.32 & 55.56 & 32.05 & 39.84 & 4.86 & 17.3 & 169.7 \\
+PageKV + Random & Static & 24.02 & 28.36 & 54.52 & 31.14 & 34.51 & 7.56 & 17.4 & 170.6 \\
+\midrule
+\multicolumn{10}{l}{\textit{Token-level granularity (static)}} \\
+TokenKV + Quest bounds & Static & 29.76 & 41.91 & 55.82 & 32.97 & 40.12 & 6.87 & 14.3 & 170.3 \\
+TokenKV + SnapKV & Static & 30.34 & 42.52 & 55.79 & 33.01 & 40.41 & 6.65 & 17.1 & 170.5 \\
+TokenKV + H2O & Static & 30.03 & 40.08 & 55.86 & 32.27 & 39.56 & 4.82 & 19.5 & 169.7 \\
+TokenKV + Recon & Static & 30.48 & 42.10 & 56.21 & 33.47 & \textbf{40.56} & 5.40 & 17.6 & 169.6 \\
+TokenKV + Exp. Attn & Static & 30.51 & 41.95 & 55.91 & 32.98 & 40.34 & 5.09 & 18.6 & 170.2 \\
+TokenKV + Random & Static & 22.13 & 23.45 & 54.88 & 28.90 & 32.34 & 6.89 & 16.8 & 170.6 \\
+\midrule
+\multicolumn{10}{l}{\textit{Dynamic methods}} \\
+ClusterAttn + Quest bounds (dyn) & Dynamic & — & 41.21 & 53.82 & 23.70 & 39.58 & 10.42 & 2.6 & 125.7 \\
+ClusterAttn + H2O (dyn) & Dynamic & 13.60 & 35.15 & 52.78 & 17.69 & 29.80 & 15.70 & 3.0 & 125.7 \\
+ClusterAttn + Exp. Attn (dyn) \dag{} & Dynamic & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash \\
+ClusterAttn + Random (dyn) & Dynamic & — & 24.84 & 54.31 & 30.75 & 36.63 & 7.02 & 4.1 & 125.7 \\
+PageKV + Quest bounds (dyn) & Dynamic & 23.63 & 40.35 & 55.44 & 31.57 & 37.75 & 2.63 & 8.6 & 125.7 \\
+PageKV + H2O (dyn) & Dynamic & 16.29 & 38.81 & 54.63 & 29.88 & 34.90 & 2.66 & 5.8 & 187.3 \\
+PageKV + Exp. Attn (dyn) \dag{} & Dynamic & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash \\
+PageKV + Random (dyn) & Dynamic & 14.22 & 38.46 & 53.63 & 27.39 & 33.42 & 2.36 & 10.5 & 125.7 \\
+TokenKV + Quest bounds (dyn) & Dynamic & 29.91 & 41.91 & 55.59 & 33.22 & 40.16 & 2.40 & 9.0 & 125.7 \\
+TokenKV + H2O (dyn) & Dynamic & 28.62 & 39.83 & 55.56 & 32.26 & 39.07 & 2.52 & 9.1 & 125.8 \\
+TokenKV + Exp. Attn (dyn) \dag{} & Dynamic & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash & \textemdash \\
+TokenKV + Random (dyn) & Dynamic & 20.83 & 24.84 & 54.31 & 30.75 & 32.68 & 2.66 & 10.8 & 125.7 \\
+\bottomrule
+\end{tabular}
+\end{table*}
