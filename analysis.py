@@ -10,10 +10,12 @@ Produces:
     - Figure 8: Scoring backend comparison — grouped bars
     - Figure 9: Static-only latency comparison — horizontal bar chart
     - Figure 10: Static-only throughput comparison — horizontal bar chart
+    - Figure 11: Static vs. Dynamic average score comparison (Quest/H2O only)
+    - Figure 12: Static vs. Dynamic latency comparison (Quest/H2O only)
 
 Usage:
   python make_figures.py \
-      --static  path/to/static_results.csv \
+      [--static path/to/static_results.csv] \
       --dynamic path/to/summary_dynamic.csv \
       --outdir  figures/
 """
@@ -78,6 +80,49 @@ def parse_static_csv(path):
             })
     return rows
 
+def parse_static_readme_table(path="README.md"):
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+
+    marker = "### Current benchmark snapshot"
+    if marker not in text:
+        raise ValueError(f"Could not find '{marker}' in {path}")
+
+    sub = text[text.index(marker):]
+    lines = [ln for ln in sub.splitlines() if ln.startswith("|")]
+    if len(lines) < 3:
+        raise ValueError(f"Could not find a markdown table under '{marker}' in {path}")
+
+    header = [c.strip() for c in lines[0].strip("|").split("|")]
+    rows = []
+    for ln in lines[2:]:
+        parts = [c.strip() for c in ln.strip("|").split("|")]
+        if len(parts) != len(header):
+            continue
+        r = dict(zip(header, parts))
+        method = r["Method"].strip()
+        if not method:
+            continue
+        rows.append({
+            "method":      method,
+            "gov_report":  parse_float(r.get("gov_report")),
+            "hotpotqa":    parse_float(r.get("hotpotqa")),
+            "lcc":         parse_float(r.get("lcc")),
+            "qasper":      parse_float(r.get("qasper")),
+            "avg":         parse_float(r.get("Average")),
+            "peak_gpu":    parse_float(r.get("Peak GPU (GB)")),
+            "kv_mb":       parse_float(r.get("KV Cache (MB)")),
+            "latency":     parse_float(r.get("Avg Latency (s)")),
+            "prefill_lat": parse_float(r.get("Avg Prefill Latency (s)")),
+            "decode_lat":  parse_float(r.get("Avg Decode Latency (s)")),
+            "throughput":  parse_float(r.get("Throughput (tok/s)")),
+            "tflops":      parse_float(r.get("Profiled TFLOPs")),
+            "tflops_s":    parse_float(r.get("Profiled TFLOPs/s")),
+            "mode":        "static" if "_static" in method else "baseline",
+            "timed_out":   False,
+        })
+    return rows
+
 def parse_dynamic_csv(path):
     rows = []
     with open(path, newline="") as f:
@@ -125,6 +170,26 @@ def _save(fig, outdir, name):
     html = os.path.join(outdir, f"{name}.html")
     fig.write_html(html, include_plotlyjs="cdn", full_html=True)
     print(f"Saved {html}")
+
+def _comparison_rows(static_rows, dynamic_rows, scorings=("quest_bounds", "h2o")):
+    rows = []
+    for gran in ["clusterattn", "pagekv", "tokenkv"]:
+        for scoring in scorings:
+            s = next((r for r in static_rows if extract_parts(r["method"]) == (gran, scoring)), None)
+            d = next((r for r in dynamic_rows if extract_parts(r["method"]) == (gran, scoring)), None)
+            if s is None:
+                continue
+            rows.append({
+                "gran": gran,
+                "scoring": scoring,
+                "label": f"{gran}<br>{SCORING_LABELS[scoring]}",
+                "static_avg": s["avg"],
+                "dynamic_avg": d["avg"] if d else None,
+                "static_lat": s["latency"],
+                "dynamic_lat": d["latency"] if d else None,
+                "timed_out": d["timed_out"] if d else True,
+            })
+    return rows
 
 def add_reference_lines(fig, static_rows):
     baseline = next((r for r in static_rows if r["method"] == "baseline"), None)
@@ -801,18 +866,159 @@ def fig10_static_throughput_comparison(static_rows, outdir):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 11: Static vs Dynamic average score comparison (Quest/H2O only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig11_avg_static_dynamic_comparison(static_rows, dynamic_rows, outdir):
+    rows = _comparison_rows(static_rows, dynamic_rows, scorings=("quest_bounds", "h2o"))
+    labels = [r["label"] for r in rows]
+    static_vals = [r["static_avg"] for r in rows]
+    dynamic_vals = [None if r["timed_out"] else r["dynamic_avg"] for r in rows]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=static_vals, y=labels, orientation="h",
+        marker=dict(color=STATIC_COLOR, opacity=0.9),
+        name="Static",
+        text=[f"{v:.2f}" if v is not None else "" for v in static_vals],
+        textposition="outside",
+        hovertemplate="Static<br>Avg score: %{x:.2f}<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=dynamic_vals, y=labels, orientation="h",
+        marker=dict(color=DYNAMIC_COLOR, opacity=0.9),
+        name="Dynamic",
+        text=[f"{v:.2f}" if v is not None else "T/O" for v in dynamic_vals],
+        textposition="outside",
+        hovertemplate="Dynamic<br>Avg score: %{x:.2f}<extra></extra>",
+    ))
+
+    for idx, r in enumerate(rows):
+        if r["timed_out"] or r["dynamic_avg"] is None or r["static_avg"] is None:
+            continue
+        delta = r["dynamic_avg"] - r["static_avg"]
+        sign = "+" if delta >= 0 else ""
+        fig.add_annotation(
+            x=max(r["static_avg"], r["dynamic_avg"]) + 0.7,
+            y=labels[idx],
+            text=f"{sign}{delta:.2f}",
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            font=dict(size=10, color="#555555"),
+        )
+
+    fig.add_annotation(
+        x=40.16, y="tokenkv<br>Quest bounds",
+        text="best dynamic",
+        showarrow=True, arrowhead=2, ax=55, ay=-12,
+        font=dict(size=11, color="#222222"),
+    )
+
+    fig.update_layout(
+        barmode="group",
+        template="plotly_white",
+        width=980,
+        height=520,
+        title=dict(
+            text="Figure 11: Avg Performance — Static vs. Dynamic (Quest bounds and H2O)",
+            x=0.5, xanchor="center"
+        ),
+        font=dict(family="Arial, sans-serif", size=12),
+        margin=dict(l=170, r=90, t=70, b=60),
+        xaxis=dict(title="Average score (higher is better)", showgrid=True, gridcolor="#eeeeee", zeroline=False),
+        yaxis=dict(title="", autorange="reversed", showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+    )
+    _save(fig, outdir, "fig11_avg_static_dynamic_comparison")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Figure 12: Static vs Dynamic latency comparison (Quest/H2O only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig12_latency_static_dynamic_comparison(static_rows, dynamic_rows, outdir):
+    rows = _comparison_rows(static_rows, dynamic_rows, scorings=("quest_bounds", "h2o"))
+    labels = [r["label"] for r in rows]
+    static_vals = [r["static_lat"] for r in rows]
+    dynamic_vals = [None if r["timed_out"] else r["dynamic_lat"] for r in rows]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=static_vals, y=labels, orientation="h",
+        marker=dict(color=STATIC_COLOR, opacity=0.9),
+        name="Static",
+        text=[f"{v:.2f}s" if v is not None else "" for v in static_vals],
+        textposition="outside",
+        hovertemplate="Static<br>Avg latency: %{x:.3f}s<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=dynamic_vals, y=labels, orientation="h",
+        marker=dict(color=DYNAMIC_COLOR, opacity=0.9),
+        name="Dynamic",
+        text=[f"{v:.2f}s" if v is not None else "T/O" for v in dynamic_vals],
+        textposition="outside",
+        hovertemplate="Dynamic<br>Avg latency: %{x:.3f}s<extra></extra>",
+    ))
+
+    for idx, r in enumerate(rows):
+        if r["timed_out"] or r["dynamic_lat"] is None or r["static_lat"] is None:
+            continue
+        delta = r["dynamic_lat"] - r["static_lat"]
+        sign = "+" if delta >= 0 else ""
+        fig.add_annotation(
+            x=max(r["static_lat"], r["dynamic_lat"]) + 0.65,
+            y=labels[idx],
+            text=f"{sign}{delta:.2f}s",
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            font=dict(size=10, color="#555555"),
+        )
+
+    fig.add_annotation(
+        x=2.403, y="tokenkv<br>Quest bounds",
+        text="huge latency win",
+        showarrow=True, arrowhead=2, ax=65, ay=-18,
+        font=dict(size=11, color="#222222"),
+    )
+
+    fig.update_layout(
+        barmode="group",
+        template="plotly_white",
+        width=980,
+        height=520,
+        title=dict(
+            text="Figure 12: Latency Comparison — Static vs. Dynamic (Quest bounds and H2O)",
+            x=0.5, xanchor="center"
+        ),
+        font=dict(family="Arial, sans-serif", size=12),
+        margin=dict(l=170, r=100, t=70, b=60),
+        xaxis=dict(title="Average latency per example (lower is better)", showgrid=True, gridcolor="#eeeeee", zeroline=False),
+        yaxis=dict(title="", autorange="reversed", showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+    )
+    _save(fig, outdir, "fig12_latency_static_dynamic_comparison")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--static",  required=True)
+    parser.add_argument("--static")
     parser.add_argument("--dynamic", required=True)
     parser.add_argument("--outdir",  default="figures")
     args = parser.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
-    static_rows  = parse_static_csv(args.static)
+    if args.static:
+        static_rows = parse_static_csv(args.static)
+        print(f"Loaded static rows from {args.static}")
+    else:
+        static_rows = parse_static_readme_table("README.md")
+        print("Loaded static rows from README.md current benchmark table")
     dynamic_rows = parse_dynamic_csv(args.dynamic)
     n_timed = sum(1 for r in dynamic_rows if r["timed_out"])
     print(f"Loaded {len(static_rows)} static, {len(dynamic_rows)} dynamic ({n_timed} timed out)")
@@ -826,6 +1032,8 @@ def main():
     fig8_scoring_backend_comparison(static_rows, args.outdir)
     fig9_static_latency_comparison(static_rows, args.outdir)
     fig10_static_throughput_comparison(static_rows, args.outdir)
+    fig11_avg_static_dynamic_comparison(static_rows, dynamic_rows, args.outdir)
+    fig12_latency_static_dynamic_comparison(static_rows, dynamic_rows, args.outdir)
 
     print("\nDone.")
 
