@@ -138,11 +138,15 @@ def apply_clusterkv_config(model, compress_args):
         cfg.ranking_backend = compress_args.get("ranking_backend")
         cfg.observation_window = compress_args.get("observation_window")
         cfg.selection_granularity = compress_args.get("selection_granularity")
-        cfg.clustering_backend = compress_args.get("clustering_backend")
-        if "num_block" in compress_args:
-            cfg.num_block = compress_args.get("num_block")
-        if "theta" in compress_args:
-            cfg.theta = compress_args.get("theta")
+        cfg.clustering_backend = compress_args.get("clustering_backend", "kmeanspp")
+        cfg.num_block = compress_args.get("num_block", 12)
+        cfg.theta = compress_args.get("theta", 0.0)
+        cfg.n_future_positions = compress_args.get("n_future_positions", 512)
+        cfg.n_sink = compress_args.get("n_sink", 4)
+        cfg.use_covariance = compress_args.get("use_covariance", True)
+        cfg.use_vnorm = compress_args.get("use_vnorm", True)
+        cfg.epsilon = compress_args.get("epsilon", 0.0)
+        cfg.hidden_states_buffer_size = compress_args.get("hidden_states_buffer_size", 128)
 
 @torch.inference_mode()
 def get_pred_single_gpu(data, max_length, max_gen,
@@ -187,6 +191,8 @@ def get_pred_single_gpu(data, max_length, max_gen,
     profiled_latency_s = None
 
     for idx, json_obj in enumerate(tqdm(data)):
+        route = None
+        route_reason = None
         if compress:
             layers = len(model.model.layers)
             if method == 'heuristic_routing':
@@ -228,10 +234,20 @@ def get_pred_single_gpu(data, max_length, max_gen,
         if compress and method == 'heuristic_routing':
             route, route_reason = choose_heuristic_route(prompt, max_gen)
             route_cfg = routing_configs[route]
-            apply_clusterkv_config(model, route_cfg["compress_args"])
+            route_compress_args = route_cfg["compress_args"]
+            apply_clusterkv_config(model, route_compress_args)
             routing_counts[route] = routing_counts.get(route, 0) + 1
             if idx < 5:
-                print(f"HEURISTIC_ROUTE example={idx} route={route} reason={route_reason} max_gen={max_gen}")
+                print(
+                    "HEURISTIC_ROUTE "
+                    f"example={idx} route={route} reason={route_reason} max_gen={max_gen} "
+                    f"capacity={route_compress_args.get('max_capacity_prompt')} "
+                    f"window={route_compress_args.get('window_size')} "
+                    f"granularity={route_compress_args.get('selection_granularity')} "
+                    f"backend={route_compress_args.get('ranking_backend')} "
+                    f"policy={route_compress_args.get('update_policy')} "
+                    f"interval={route_compress_args.get('update_interval')}"
+                )
 
         tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt").input_ids[0]
         if "chatglm3" in model_name:
@@ -267,7 +283,11 @@ def get_pred_single_gpu(data, max_length, max_gen,
         torch.cuda.synchronize()
         prefill_start = time.perf_counter()
         with torch.no_grad():
-            _ = model(input.input_ids, attention_mask=input.get("attention_mask"))
+            _ = model(
+                input.input_ids,
+                attention_mask=input.get("attention_mask"),
+                use_cache=False,
+            )
         torch.cuda.synchronize()
         prefill_latency_s = time.perf_counter() - prefill_start
         prefill_latencies_s.append(prefill_latency_s)
@@ -305,9 +325,25 @@ def get_pred_single_gpu(data, max_length, max_gen,
 
         pred = tokenizer.decode(output[context_length:], skip_special_tokens=True)
         pred = post_process(pred, model_name)
-        generated_tokens.append(max(int(output.shape[0] - context_length), 0))
+        generated_token_count = max(int(output.shape[0] - context_length), 0)
+        generated_tokens.append(generated_token_count)
         with open(out_path, "a", encoding="utf-8") as f:
-            json.dump({"pred": pred, "answers": json_obj["answers"], "all_classes": json_obj["all_classes"], "length": json_obj["length"]}, f, ensure_ascii=False)
+            record = {
+                "example_idx": idx,
+                "pred": pred,
+                "answers": json_obj["answers"],
+                "all_classes": json_obj["all_classes"],
+                "length": json_obj["length"],
+                "context_length": context_length,
+                "latency_s": step_latency_s,
+                "prefill_latency_s": prefill_latency_s,
+                "decode_latency_s": decode_latency_s,
+                "generated_tokens": generated_token_count,
+            }
+            if route is not None:
+                record["heuristic_route"] = route
+                record["heuristic_route_reason"] = route_reason
+            json.dump(record, f, ensure_ascii=False)
             f.write('\n')
 
     # Memory summary after all inference

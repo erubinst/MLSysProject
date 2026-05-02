@@ -16,13 +16,14 @@ image = (
         "datasets==2.16.0",
         extra_index_url="https://download.pytorch.org/whl/cu121"
     )
-    .pip_install("transformers==4.37.0")
+    .pip_install("transformers==4.37.0", "huggingface-hub==0.36.2")
+    .pip_install("fschat==0.2.36", "sentencepiece", "protobuf")
     .pip_install(
         "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/flash_attn-2.6.3+cu121torch2.4-cp311-cp311-linux_x86_64.whl"
     )
     .pip_install("jieba", "rouge", "fuzzywuzzy", "python-Levenshtein")
     .add_local_dir(".", remote_path="/app", copy=True, ignore=[".venv"])
-    .run_commands("cd /app && pip install -e .")
+    .run_commands("cd /app && pip install -e . --no-deps")
 )
 
 # ============================================================
@@ -32,6 +33,7 @@ image = (
 DATASETS = ["qasper", "hotpotqa", "gov_report", "lcc"]
 VALIDATION_DATASET = "hotpotqa"
 VALIDATION_SAMPLE_OFFSET = 0
+XGB_ROUTER_SAMPLE_LIMIT = 100
 
 STATIC_METHODS = [
     "baseline",
@@ -71,6 +73,15 @@ DYNAMIC_METHODS = [
     "tokenkv_h2o_dynamic",
     "tokenkv_expected_attention_dynamic",
     "tokenkv_random_dynamic",
+]
+
+XGB_ROUTER_CANDIDATE_METHODS = [
+    "tokenkv_quest_bounds_dynamic100",
+    "clusterattn_recon_static",
+    "clusterattn_quest_bounds_static",
+    "pagekv_quest_bounds_static",
+    "tokenkv_quest_bounds_static",
+    "tokenkv_h2o_dynamic",
 ]
 
 def _build_run_tag(version: str = "1", run_tag: str = "") -> str:
@@ -544,7 +555,7 @@ METHODS = {
     secrets=[modal.Secret.from_name("huggingface")],
     timeout=7200
 )
-def run_inference(method: str, dataset: str, run_tag: str):
+def run_inference(method: str, dataset: str, run_tag: str, limit: int | None = None, sample_offset: int = 0):
     import subprocess, shutil, os, re, json
 
     cfg = _resolve_method_config(method, dataset)
@@ -554,9 +565,13 @@ def run_inference(method: str, dataset: str, run_tag: str):
         "--dataset", dataset,
         "--write_model_name", cfg["model_name"],
     ] + cfg["extra_args"]
+    if limit is not None:
+        cmd += ["--limit", str(limit), "--sample_offset", str(sample_offset)]
 
     print(f"\n{'='*50}")
     print(f"Running {method} on {dataset}")
+    if limit is not None:
+        print(f"Sample slice: offset={sample_offset}, limit={limit}")
     print(f"Run tag: {run_tag}")
     print(f"Command: {' '.join(cmd)}")
     print(f"{'='*50}\n")
@@ -642,6 +657,8 @@ def run_inference(method: str, dataset: str, run_tag: str):
                 "script": cfg["script"],
                 "extra_args": cfg["extra_args"],
                 "routed_method": cfg.get("routed_method"),
+                "limit": limit,
+                "sample_offset": sample_offset,
                 "returncode": result.returncode,
             },
             f,
@@ -753,6 +770,22 @@ def submit_inference_batch(methods: list[str], run_tag: str):
             run_inference.spawn(method, dataset, run_tag)
             submitted += 1
     print(f"Submitted {submitted} inference jobs for run {run_tag}.")
+    return submitted
+
+
+@app.function(
+    image=image,
+    volumes={"/models": volume},
+    timeout=1800
+)
+def submit_inference_limited_batch(methods: list[str], run_tag: str, limit: int, sample_offset: int = 0):
+    submitted = 0
+    for method in methods:
+        for dataset in DATASETS:
+            print(f"Submitting {method} / {dataset} offset={sample_offset} limit={limit}...")
+            run_inference.spawn(method, dataset, run_tag, limit, sample_offset)
+            submitted += 1
+    print(f"Submitted {submitted} limited inference jobs for run {run_tag}.")
     return submitted
 
 
@@ -972,6 +1005,7 @@ def generate_csv(run_tag: str):
         "tokenkv_expected_attention_static",
         "tokenkv_random_static",
         "tokenkv_quest_bounds_dynamic",
+        "tokenkv_quest_bounds_dynamic100",
         "tokenkv_h2o_dynamic",
         "tokenkv_expected_attention_dynamic",
         "tokenkv_random_dynamic",
@@ -1067,6 +1101,170 @@ def generate_csv(run_tag: str):
 @app.function(
     image=image,
     volumes={"/models": volume},
+    timeout=900
+)
+def generate_xgb_router_dataset(run_tag: str, methods: list[str] | None = None, latency_weight: float = 0.0):
+    import json, os, sys
+    from datasets import load_dataset
+
+    sys.path.insert(0, "/app/experiments/LongBench")
+    from eval import dataset2metric
+
+    methods_to_use = methods or XGB_ROUTER_CANDIDATE_METHODS
+    config_dir = "/app/experiments/LongBench/config"
+    with open(os.path.join(config_dir, "dataset2prompt.json")) as f:
+        dataset2prompt = json.load(f)
+    with open(os.path.join(config_dir, "dataset2maxlen.json")) as f:
+        dataset2maxlen = json.load(f)
+
+    code_markers = (
+        "def ", "class ", "import ", "from ", "return ", "self.", "->", "::",
+        "();", "</", "#include", "public ", "private ",
+    )
+    summary_markers = (
+        "summary:", "summarize", "write a summary", "write a one-page summary",
+    )
+    qa_markers = (
+        "question:", "answer:", "passage", "given passages", "given a scientific article",
+    )
+
+    def prompt_features(prompt: str, max_gen: int):
+        sample = (prompt[:512] + "\n" + prompt[-512:]).lower()
+        code_hits = sum(marker in sample for marker in code_markers)
+        summary_hits = sum(marker in sample for marker in summary_markers)
+        qa_hits = sum(marker in sample for marker in qa_markers)
+        return {
+            "max_gen": max_gen,
+            "prompt_chars": len(prompt),
+            "sample_chars": len(sample),
+            "code_marker_hits": code_hits,
+            "summary_marker_hits": summary_hits,
+            "qa_marker_hits": qa_hits,
+            "newline_ratio": (prompt.count("\n") / max(len(prompt), 1)),
+            "digit_ratio": (sum(ch.isdigit() for ch in prompt) / max(len(prompt), 1)),
+            "punct_ratio": (sum((not ch.isalnum()) and (not ch.isspace()) for ch in prompt) / max(len(prompt), 1)),
+        }
+
+    def load_predictions(method: str, dataset: str):
+        model_name = METHODS[method]["model_name"]
+        path = f"{_predictions_dir(run_tag, method)}/pred_e/{model_name}/{dataset}.jsonl"
+        if not os.path.exists(path):
+            path = f"{_predictions_dir(run_tag, method)}/pred/{model_name}/{dataset}.jsonl"
+        if not os.path.exists(path):
+            return None
+        rows = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                rows.append(json.loads(line))
+        return rows
+
+    def load_avg_latency(method: str, dataset: str):
+        path = f"{_results_dir(run_tag)}/{method}_{dataset}_memory.json"
+        if not os.path.exists(path):
+            return None
+        with open(path) as f:
+            return json.load(f).get("avg_latency_s")
+
+    def score_prediction(dataset: str, pred: str, answers: list[str], all_classes):
+        score = 0.0
+        metric = dataset2metric[dataset]
+        if dataset in ["trec", "triviaqa", "samsum", "lsht"]:
+            pred = pred.lstrip("\n").split("\n")[0]
+        for answer in answers:
+            score = max(score, metric(pred, answer, all_classes=all_classes))
+        return round(100 * score, 6)
+
+    out_dir = f"{_results_dir(run_tag)}/router_data"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = f"{out_dir}/xgb_candidates.jsonl"
+    summary_path = f"{out_dir}/xgb_candidates_summary.json"
+
+    total_records = 0
+    missing = []
+    best_counts = {}
+    with open(out_path, "w", encoding="utf-8") as out_f:
+        for dataset in DATASETS:
+            data = list(load_dataset("THUDM/LongBench", dataset, split="test", trust_remote_code=True))
+            prompt_format = dataset2prompt[dataset]
+            max_gen = dataset2maxlen[dataset]
+            method_rows = {method: load_predictions(method, dataset) for method in methods_to_use}
+            for method, rows in method_rows.items():
+                if rows is None:
+                    missing.append({"method": method, "dataset": dataset, "reason": "missing_predictions"})
+
+            complete_methods = [method for method, rows in method_rows.items() if rows is not None]
+            if not complete_methods:
+                continue
+
+            avg_latencies = {method: load_avg_latency(method, dataset) for method in complete_methods}
+            row_count = min(len(method_rows[method]) for method in complete_methods)
+            for idx in range(min(len(data), row_count)):
+                prompt = prompt_format.format(**data[idx])
+                candidates = {}
+                for method in complete_methods:
+                    pred_row = method_rows[method][idx]
+                    latency_s = pred_row.get("latency_s")
+                    if latency_s is None:
+                        latency_s = avg_latencies.get(method)
+                    score = score_prediction(
+                        dataset,
+                        pred_row.get("pred", ""),
+                        pred_row.get("answers", []),
+                        pred_row.get("all_classes"),
+                    )
+                    utility = score - latency_weight * latency_s if latency_s is not None else score
+                    candidates[method] = {
+                        "score": score,
+                        "utility": utility,
+                        "latency_s": latency_s,
+                        "prefill_latency_s": pred_row.get("prefill_latency_s"),
+                        "decode_latency_s": pred_row.get("decode_latency_s"),
+                        "generated_tokens": pred_row.get("generated_tokens"),
+                        "context_length": pred_row.get("context_length"),
+                        "pred": pred_row.get("pred", ""),
+                    }
+
+                best_score_method = max(candidates, key=lambda method: candidates[method]["score"])
+                best_utility_method = max(candidates, key=lambda method: candidates[method]["utility"])
+                best_counts[best_utility_method] = best_counts.get(best_utility_method, 0) + 1
+                record = {
+                    "run_tag": run_tag,
+                    "dataset": dataset,
+                    "example_idx": idx,
+                    "length": data[idx].get("length"),
+                    "features": prompt_features(prompt, max_gen),
+                    "candidate_methods": complete_methods,
+                    "candidates": candidates,
+                    "best_score_method": best_score_method,
+                    "best_utility_method": best_utility_method,
+                    "latency_weight": latency_weight,
+                }
+                json.dump(record, out_f, ensure_ascii=False)
+                out_f.write("\n")
+                total_records += 1
+
+    summary = {
+        "run_tag": run_tag,
+        "methods": methods_to_use,
+        "datasets": DATASETS,
+        "records": total_records,
+        "latency_weight": latency_weight,
+        "best_utility_counts": best_counts,
+        "missing": missing,
+        "output": out_path,
+    }
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    print(f"Saved XGBoost router dataset to {out_path}")
+    print(f"Saved XGBoost router summary to {summary_path}")
+    print(json.dumps(summary, indent=2))
+    return summary
+
+
+@app.function(
+    image=image,
+    volumes={"/models": volume},
     timeout=120
 )
 def verify_eval_complete(run_tag: str, methods: list[str] | None = None):
@@ -1137,6 +1335,13 @@ def _submit_inference_methods(methods: list[str], version: str = "1", run_tag: s
     print(f"Submitted remote inference orchestrator for {len(methods)} method(s).")
 
 
+def _submit_limited_inference_methods(methods: list[str], version: str = "1", run_tag: str = "", limit: int = XGB_ROUTER_SAMPLE_LIMIT, sample_offset: int = 0):
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    submit_inference_limited_batch.spawn(methods, resolved_run_tag, limit, sample_offset)
+    print(f"Submitted remote limited inference orchestrator for {len(methods)} method(s), limit={limit}, offset={sample_offset}.")
+
+
 def _submit_eval_methods(methods: list[str], run_tag: str):
     submit_eval_batch.spawn(methods, run_tag)
     print(f"Submitted remote eval orchestrator for {len(methods)} method(s).")
@@ -1204,6 +1409,49 @@ def main_verify_eval_dynamic(run_tag: str):
 def main_validate_all_dynamic(version: str = "1", run_tag: str = ""):
     """Run one-example validation for all current dynamic methods."""
     _submit_validation_methods(DYNAMIC_METHODS, version, run_tag)
+
+
+@app.local_entrypoint()
+def main_xgb_router_data(version: str = "1", run_tag: str = ""):
+    """Run inference for the XGBoost router candidate methods."""
+    _submit_inference_methods(XGB_ROUTER_CANDIDATE_METHODS, version, run_tag)
+
+
+@app.local_entrypoint()
+def main_xgb_router_data_100(version: str = "1", run_tag: str = "", sample_offset: int = 0):
+    """Run 100 examples per dataset for the XGBoost router candidate methods."""
+    _submit_limited_inference_methods(
+        XGB_ROUTER_CANDIDATE_METHODS,
+        version,
+        run_tag,
+        XGB_ROUTER_SAMPLE_LIMIT,
+        sample_offset,
+    )
+
+
+@app.local_entrypoint()
+def main_eval_xgb_router_data(run_tag: str):
+    """Score the XGBoost router candidate-method predictions."""
+    _submit_eval_methods(XGB_ROUTER_CANDIDATE_METHODS, run_tag)
+
+
+@app.local_entrypoint()
+def main_verify_eval_xgb_router_data(run_tag: str):
+    """Check eval artifacts for the XGBoost router candidate methods."""
+    verify_eval_complete.spawn(run_tag, XGB_ROUTER_CANDIDATE_METHODS)
+
+
+@app.local_entrypoint()
+def main_build_xgb_router_data(run_tag: str, latency_weight: float = 0.0):
+    """Build per-example XGBoost router training rows from candidate predictions."""
+    generate_xgb_router_dataset.spawn(run_tag, XGB_ROUTER_CANDIDATE_METHODS, latency_weight)
+
+
+@app.local_entrypoint()
+def main_validate_xgb_router_data(version: str = "1", run_tag: str = ""):
+    """Run one-example validation for the XGBoost router candidate methods."""
+    _submit_validation_methods(XGB_ROUTER_CANDIDATE_METHODS, version, run_tag)
+
 
 @app.local_entrypoint()
 def main_validate_single(version: str = "1", run_tag: str = ""):

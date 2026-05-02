@@ -105,6 +105,21 @@ This is the recommended way to submit longer inference or evaluation jobs.
 | --- | --- | --- | --- | --- |
 | Michael | `1` | all static methods | `v1_20260427_030527` | [ap-7D5pMzxNUjZkXQWrnUoZpS](https://modal.com/apps/huxinyu1997/main/ap-7D5pMzxNUjZkXQWrnUoZpS) |
 | Michael | `3` | heuristic routing | `v3_20260501_013635` | [ap-rbfehVDnVXvKYjy8Ut08V4](https://modal.com/apps/huxinyu1997/main/ap-rbfehVDnVXvKYjy8Ut08V4) |
+| Michael | `4` | heuristic routing | `v4_20260502_164454` | [ap-QZ1Wk2M84eKGIJntqjenCX](https://modal.com/apps/huxinyu1997/main/ap-QZ1Wk2M84eKGIJntqjenCX) |
+| Michael | `5` | XGBoost router data, 100 examples per dataset | `v5_20260502_164834` | [ap-eaVZCLvPr7rREX6JZvq2w3](https://modal.com/apps/huxinyu1997/main/ap-eaVZCLvPr7rREX6JZvq2w3) |
+
+### Heuristic Routing Result: `v3_20260501_013635`
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| heuristic_routing | 29.91 | 54.55 | 56.29 | 51.14 | 47.97 | 50.7 | 37592.3 | 2.274 | 0.417 | 1.857 | 4.135 | 46.942 | 27.55 | 254.137696 | 6.77236 |
+
+Verification status: incomplete. `main_verify_eval_heuristic_routing` reports missing logged metrics for `qasper`, `hotpotqa`, and `gov_report`, so the score row is recorded for reference but the memory, latency, throughput, and FLOPs columns are not reliable for this run yet.
+
+Analysis:
+- Accuracy is much higher than the previous full static benchmark average (`47.97` vs roughly `41`), but `hotpotqa=54.55` and `qasper=51.14` are large jumps and should be treated as suspicious until the run is re-verified against complete inference metric logs.
+- Systems metrics appear to be aggregated from incomplete logging. The reported `50.7 GB` peak GPU and `37.6 GB` KV cache should not be compared directly with the earlier static/dynamic tables.
+- Before using this as a headline result, rerun or repair heuristic inference for the same run tag and require `EVAL PASSED`.
 
 ## Versioned Runs
 All Modal artifacts are now versioned.
@@ -186,6 +201,41 @@ One-example validation:
 ```bash
 modal run --detach test.py::main_validate_heuristic_routing --version 1
 ```
+
+## XGBoost Router Data Collection
+The learned-router data collection runs a small candidate method set per example, then joins predictions into per-example training rows for an XGBoost method selector.
+
+Candidate methods:
+- `tokenkv_quest_bounds_dynamic100`
+- `clusterattn_recon_static`
+- `clusterattn_quest_bounds_static`
+- `pagekv_quest_bounds_static`
+- `tokenkv_quest_bounds_static`
+- `tokenkv_h2o_dynamic`
+
+Collection flow:
+
+```bash
+modal run --detach test.py::main_xgb_router_data_100 --version 1
+modal run --detach test.py::main_eval_xgb_router_data --run-tag <run_tag>
+modal run --detach test.py::main_verify_eval_xgb_router_data --run-tag <run_tag>
+modal run --detach test.py::main_build_xgb_router_data --run-tag <run_tag>
+```
+
+`main_xgb_router_data_100` runs 100 examples per dataset, so the default collection size is:
+
+```text
+6 candidate methods * 4 datasets * 100 examples = 2400 candidate predictions
+```
+
+Output:
+
+```text
+/models/runs/<run_tag>/results/router_data/xgb_candidates.jsonl
+/models/runs/<run_tag>/results/router_data/xgb_candidates_summary.json
+```
+
+Each JSONL row contains prompt-window features, per-candidate prediction score, latency fields when available, and the best candidate label. Use `--latency-weight` on `main_build_xgb_router_data` to label by `score - latency_weight * latency_s`; the default labels by score only.
 
 ## One-Example Validation
 There is a lightweight Modal validation flow for sanity checking method wiring before or after running the full benchmark.
