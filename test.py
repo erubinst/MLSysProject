@@ -84,6 +84,15 @@ XGB_ROUTER_CANDIDATE_METHODS = [
     "tokenkv_h2o_dynamic",
 ]
 
+# Default grid for main_topk_ablation (override with --base-methods-csv / --k-rets-csv).
+TOPK_ABLATION_DEFAULT_BASE_METHODS = [
+    "tokenkv_snapkv_static",
+    "clusterattn_snapkv_static",
+    "clusterattn_expected_attention_static",
+]
+TOPK_ABLATION_DEFAULT_K_RETS = [512, 1024, 2048, 3072, 4032]
+
+
 def _build_run_tag(version: str = "1", run_tag: str = "") -> str:
     if run_tag:
         return run_tag
@@ -105,13 +114,6 @@ def _results_dir(run_tag: str) -> str:
 def _validations_dir(run_tag: str) -> str:
     return f"/models/runs/{run_tag}/validations"
 
-
-def _is_registered_method(method: str) -> bool:
-    return method in METHODS
-
-
-def _resolve_method_config(method: str, dataset: str | None = None):
-    return METHODS[method]
 
 METHODS = {
     "baseline": {
@@ -544,26 +546,103 @@ METHODS = {
     },
 }
 
-# ============================================================
-# Inference
-# ============================================================
+# Top-k ablation: synthetic method id is "{base_method}__kret{k_ret}" where
+# k_ret = max_capacity_prompt - window_size (see clusterkv_utils token_budget).
+TOPK_METHOD_DELIM = "__kret"
 
-@app.function(
-    gpu="A100",
-    image=image,
-    volumes={"/models": volume},
-    secrets=[modal.Secret.from_name("huggingface")],
-    timeout=7200
-)
-def run_inference(method: str, dataset: str, run_tag: str, limit: int | None = None, sample_offset: int = 0):
-    import subprocess, shutil, os, re, json
 
-    cfg = _resolve_method_config(method, dataset)
+def _parse_topk_ablation_method(method: str) -> tuple[str, int] | None:
+    if TOPK_METHOD_DELIM not in method:
+        return None
+    base, sep, k_part = method.rpartition(TOPK_METHOD_DELIM)
+    if not base or sep != TOPK_METHOD_DELIM or not k_part.isdigit():
+        return None
+    return base, int(k_part)
+
+
+def _materialize_topk_method_config(base_method: str, k_ret: int) -> dict:
+    import json
+    import os
+
+    if base_method not in METHODS:
+        raise KeyError(f"Unknown base method {base_method!r} for top-k ablation")
+    base_cfg = METHODS[base_method]
+    extra = list(base_cfg["extra_args"])
+    rel_template = None
+    for i, a in enumerate(extra):
+        if a == "--compress_args_path" and i + 1 < len(extra):
+            rel_template = extra[i + 1]
+            break
+    if rel_template is None:
+        raise ValueError(
+            f"Method {base_method!r} has no --compress_args_path; top-k ablation only applies "
+            "to clusterkv/quest configs under experiments/LongBench/config."
+        )
+    config_root = "/app/experiments/LongBench/config"
+    src_path = os.path.join(config_root, rel_template)
+    with open(src_path, encoding="utf-8") as f:
+        data = json.load(f)
+    if "window_size" not in data or "max_capacity_prompt" not in data:
+        raise ValueError(
+            f"Template {rel_template!r} must contain window_size and max_capacity_prompt for top-k ablation."
+        )
+    window_size = int(data["window_size"])
+    data["max_capacity_prompt"] = window_size + int(k_ret)
+    out_rel = f"_topk_ablation/{base_method}_kret{k_ret}.json"
+    out_path = os.path.join(config_root, out_rel)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    for i, a in enumerate(extra):
+        if a == "--compress_args_path" and i + 1 < len(extra):
+            extra[i + 1] = out_rel
+            break
+    model_name = base_cfg["model_name"] + f"_kret{k_ret}"
+    return {
+        "script": base_cfg["script"],
+        "extra_args": extra,
+        "model_name": model_name,
+    }
+
+
+def _is_registered_method(method: str) -> bool:
+    if method in METHODS:
+        return True
+    parsed = _parse_topk_ablation_method(method)
+    return parsed is not None and parsed[0] in METHODS
+
+
+def _resolve_method_config(method: str, dataset: str | None = None):
+    parsed = _parse_topk_ablation_method(method)
+    if parsed is not None:
+        base_method, k_ret = parsed
+        return _materialize_topk_method_config(base_method, k_ret)
+    return METHODS[method]
+
+
+def _execute_inference_run(
+    method: str,
+    cfg: dict,
+    dataset: str,
+    run_tag: str,
+    limit: int | None = None,
+    sample_offset: int = 0,
+):
+    import json
+    import os
+    import re
+    import shutil
+    import subprocess
+
     cmd = [
-        "python", cfg["script"],
-        "--model", "mistral-7B-instruct-v0.2",
-        "--dataset", dataset,
-        "--write_model_name", cfg["model_name"],
+        "python",
+        cfg["script"],
+        "--model",
+        "mistral-7B-instruct-v0.2",
+        "--dataset",
+        dataset,
+        "--write_model_name",
+        cfg["model_name"],
     ] + cfg["extra_args"]
     if limit is not None:
         cmd += ["--limit", str(limit), "--sample_offset", str(sample_offset)]
@@ -577,14 +656,12 @@ def run_inference(method: str, dataset: str, run_tag: str, limit: int | None = N
     print(f"{'='*50}\n")
 
     result = subprocess.run(
-        cmd, cwd="/app/experiments/LongBench",
-        capture_output=True, text=True
+        cmd, cwd="/app/experiments/LongBench", capture_output=True, text=True
     )
     print(result.stdout)
     if result.stderr:
         print(result.stderr)
 
-    # Save predictions to volume
     pred_dir = _predictions_dir(run_tag, method)
     os.makedirs(pred_dir, exist_ok=True)
     for d in ["pred", "pred_e"]:
@@ -664,6 +741,43 @@ def run_inference(method: str, dataset: str, run_tag: str, limit: int | None = N
             f,
         )
     print(f"Saved inference metadata to {metadata_path}")
+
+
+# ============================================================
+# Inference
+# ============================================================
+
+@app.function(
+    gpu="A100",
+    image=image,
+    volumes={"/models": volume},
+    secrets=[modal.Secret.from_name("huggingface")],
+    timeout=7200
+)
+def run_inference(method: str, dataset: str, run_tag: str, limit: int | None = None, sample_offset: int = 0):
+    cfg = _resolve_method_config(method, dataset)
+    _execute_inference_run(method, cfg, dataset, run_tag, limit, sample_offset)
+
+
+@app.function(
+    gpu="A100",
+    image=image,
+    volumes={"/models": volume},
+    secrets=[modal.Secret.from_name("huggingface")],
+    timeout=7200
+)
+def run_inference_topk(
+    base_method: str,
+    k_ret: int,
+    dataset: str,
+    run_tag: str,
+    limit: int | None = None,
+    sample_offset: int = 0,
+):
+    """Run one (base_method, k_ret) cell; method id is base_method + '__kret' + str(k_ret)."""
+    method = f"{base_method}{TOPK_METHOD_DELIM}{k_ret}"
+    cfg = _resolve_method_config(method, dataset)
+    _execute_inference_run(method, cfg, dataset, run_tag, limit, sample_offset)
 
 
 @app.function(
@@ -2299,6 +2413,51 @@ def main_eval_tokenkv_expected_attention_static(run_tag: str):
 def main_eval_tokenkv_random_static(run_tag: str):
     for dataset in DATASETS:
         run_eval.spawn("tokenkv_random_static", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_topk_ablation(
+    version: str = "1",
+    run_tag: str = "",
+    base_methods_csv: str = "",
+    k_rets_csv: str = "",
+    limit: int | None = None,
+    sample_offset: int = 0,
+):
+    """
+    Sweep max_capacity_prompt via k_ret = max_capacity_prompt - window_size for each base method.
+
+    Each job uses synthetic method id "{base}__kret{k_ret}" (eval/validate with the same id).
+    Override defaults: --base-methods-csv clusterattn_h2o_static,tokenkv_snapkv_static
+    --k-rets-csv 256,512,1024,2048
+    """
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    bases = [b.strip() for b in base_methods_csv.split(",") if b.strip()]
+    if not bases:
+        bases = list(TOPK_ABLATION_DEFAULT_BASE_METHODS)
+    k_list = [int(x.strip()) for x in k_rets_csv.split(",") if x.strip()]
+    if not k_list:
+        k_list = list(TOPK_ABLATION_DEFAULT_K_RETS)
+    for b in bases:
+        if b not in METHODS:
+            raise ValueError(f"Unknown base method {b!r}; must be a key in METHODS.")
+        extra = METHODS[b]["extra_args"]
+        if "--compress_args_path" not in extra:
+            raise ValueError(
+                f"{b!r} has no --compress_args_path in extra_args; "
+                "top-k ablation only applies to methods that load a LongBench JSON config."
+            )
+    print(f"Run tag: {resolved_run_tag}")
+    print(f"Top-k ablation: bases={bases} k_ret list={k_list} datasets={DATASETS}")
+    submitted = 0
+    for base_method in bases:
+        for k_ret in k_list:
+            for dataset in DATASETS:
+                run_inference_topk.spawn(
+                    base_method, k_ret, dataset, resolved_run_tag, limit, sample_offset
+                )
+                submitted += 1
+    print(f"Submitted {submitted} top-k ablation inference jobs.")
+
 
 @app.local_entrypoint()
 def main_h2o(version: str = "1", run_tag: str = ""):
