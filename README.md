@@ -107,6 +107,7 @@ This is the recommended way to submit longer inference or evaluation jobs.
 | Michael | `3` | heuristic routing | `v3_20260501_013635` | [ap-rbfehVDnVXvKYjy8Ut08V4](https://modal.com/apps/huxinyu1997/main/ap-rbfehVDnVXvKYjy8Ut08V4) |
 | Michael | `4` | heuristic routing | `v4_20260502_164454` | [ap-QZ1Wk2M84eKGIJntqjenCX](https://modal.com/apps/huxinyu1997/main/ap-QZ1Wk2M84eKGIJntqjenCX) |
 | Michael | `5` | XGBoost router data, 100 examples per dataset | `v5_20260502_164834` | [ap-eaVZCLvPr7rREX6JZvq2w3](https://modal.com/apps/huxinyu1997/main/ap-eaVZCLvPr7rREX6JZvq2w3) |
+| Michael | `6` | heuristic routing, fixed cache state and generate-only memory | `v6_20260502_173239` | [ap-PkBinoedjo9WMYx0RvK1JR](https://modal.com/apps/huxinyu1997/main/ap-PkBinoedjo9WMYx0RvK1JR) |
 
 ### Heuristic Routing Result: `v3_20260501_013635`
 
