@@ -931,43 +931,65 @@ def overwrite_past_key_value(past_key_value, layer_idx: int, key_states: torch.T
     raise AttributeError("Unsupported cache structure for overwriting compressed KV states")
 
 def init_clusterkv(self):
-    if not hasattr(self, "kv_cluster"):
-        if not hasattr(self.config, 'n_clusters'):
-            self.config.n_clusters = 128
-        if not hasattr(self.config, 'window_size'):
-            self.config.window_size = 64
-        if not hasattr(self.config, 'max_capacity_prompt'):
-            self.config.max_capacity_prompt = 4096
-        if not hasattr(self.config, 'update_policy'):
-            self.config.update_policy = 'incremental'
-        if not hasattr(self.config, 'update_interval'):
-            self.config.update_interval = 100
-        if not hasattr(self.config, 'page_size'):
-            self.config.page_size = 16
-        if not hasattr(self.config, 'ranking_backend'):
-            self.config.ranking_backend = 'quest_bounds'
-        if not hasattr(self.config, 'observation_window'):
-            self.config.observation_window = 32
-        if not hasattr(self.config, 'selection_granularity'):
-            self.config.selection_granularity = 'cluster'
-        if (not hasattr(self.config, 'clustering_backend')) or (getattr(self.config, "clustering_backend") is None):
-            self.config.clustering_backend = 'kmeanspp'
-        if not hasattr(self.config, 'num_block'):
-            self.config.num_block = 12
-        if not hasattr(self.config, 'theta'):
-            self.config.theta = 0.0
-        if not hasattr(self.config, 'n_future_positions'):
-            self.config.n_future_positions = 512
-        if not hasattr(self.config, 'n_sink'):
-            self.config.n_sink = 4
-        if not hasattr(self.config, 'use_covariance'):
-            self.config.use_covariance = True
-        if not hasattr(self.config, 'use_vnorm'):
-            self.config.use_vnorm = True
-        if not hasattr(self.config, 'epsilon'):
-            self.config.epsilon = 0.0
-        if not hasattr(self.config, 'hidden_states_buffer_size'):
-            self.config.hidden_states_buffer_size = 128
+    if not hasattr(self.config, 'n_clusters'):
+        self.config.n_clusters = 128
+    if not hasattr(self.config, 'window_size'):
+        self.config.window_size = 64
+    if not hasattr(self.config, 'max_capacity_prompt'):
+        self.config.max_capacity_prompt = 4096
+    if not hasattr(self.config, 'update_policy'):
+        self.config.update_policy = 'incremental'
+    if not hasattr(self.config, 'update_interval'):
+        self.config.update_interval = 100
+    if not hasattr(self.config, 'page_size'):
+        self.config.page_size = 16
+    if not hasattr(self.config, 'ranking_backend'):
+        self.config.ranking_backend = 'quest_bounds'
+    if not hasattr(self.config, 'observation_window'):
+        self.config.observation_window = 32
+    if not hasattr(self.config, 'selection_granularity'):
+        self.config.selection_granularity = 'cluster'
+    if (not hasattr(self.config, 'clustering_backend')) or (getattr(self.config, "clustering_backend") is None):
+        self.config.clustering_backend = 'kmeanspp'
+    if not hasattr(self.config, 'num_block'):
+        self.config.num_block = 12
+    if not hasattr(self.config, 'theta'):
+        self.config.theta = 0.0
+    if not hasattr(self.config, 'n_future_positions'):
+        self.config.n_future_positions = 512
+    if not hasattr(self.config, 'n_sink'):
+        self.config.n_sink = 4
+    if not hasattr(self.config, 'use_covariance'):
+        self.config.use_covariance = True
+    if not hasattr(self.config, 'use_vnorm'):
+        self.config.use_vnorm = True
+    if not hasattr(self.config, 'epsilon'):
+        self.config.epsilon = 0.0
+    if not hasattr(self.config, 'hidden_states_buffer_size'):
+        self.config.hidden_states_buffer_size = 128
+
+    signature = (
+        self.config.n_clusters,
+        self.config.window_size,
+        self.config.max_capacity_prompt,
+        self.config.update_policy,
+        self.config.update_interval,
+        self.config.page_size,
+        self.config.ranking_backend,
+        self.config.observation_window,
+        self.config.selection_granularity,
+        self.config.clustering_backend,
+        self.config.num_block,
+        self.config.theta,
+        self.config.n_future_positions,
+        self.config.n_sink,
+        self.config.use_covariance,
+        self.config.use_vnorm,
+        self.config.epsilon,
+        self.config.hidden_states_buffer_size,
+    )
+    if hasattr(self, "kv_cluster") and getattr(self, "_kv_cluster_signature", None) == signature:
+        return
 
     self.kv_cluster = ClusterKVCache(
         n_clusters=self.config.n_clusters,
@@ -989,3 +1011,4 @@ def init_clusterkv(self):
         epsilon=self.config.epsilon,
         hidden_states_buffer_size=self.config.hidden_states_buffer_size,
     )
+    self._kv_cluster_signature = signature

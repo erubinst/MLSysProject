@@ -148,6 +148,15 @@ def apply_clusterkv_config(model, compress_args):
         cfg.epsilon = compress_args.get("epsilon", 0.0)
         cfg.hidden_states_buffer_size = compress_args.get("hidden_states_buffer_size", 128)
 
+def reset_kv_runtime_state(model):
+    if not hasattr(model, "model") or not hasattr(model.model, "layers"):
+        return
+    for layer in model.model.layers:
+        attn = layer.self_attn
+        attn.kv_seq_len = 0
+        if hasattr(attn, "kv_cluster"):
+            attn.kv_cluster.reset()
+
 @torch.inference_mode()
 def get_pred_single_gpu(data, max_length, max_gen,
                         prompt_format, dataset, model_name,
@@ -185,6 +194,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
     latencies_s = []
     prefill_latencies_s = []
     decode_latencies_s = []
+    generate_peak_mbs = []
     generated_tokens = []
     routing_counts = {}
     profiled_flops = None
@@ -281,19 +291,18 @@ def get_pred_single_gpu(data, max_length, max_gen,
 
         # Measure prefill latency (processing the input prompt)
         torch.cuda.synchronize()
+        reset_kv_runtime_state(model)
         prefill_start = time.perf_counter()
         with torch.no_grad():
-            _ = model(
-                input.input_ids,
-                attention_mask=input.get("attention_mask"),
-                use_cache=False,
-            )
+            _ = model(input.input_ids, attention_mask=input.get("attention_mask"))
         torch.cuda.synchronize()
         prefill_latency_s = time.perf_counter() - prefill_start
         prefill_latencies_s.append(prefill_latency_s)
         
         # Measure total latency (prefill + decode)
         torch.cuda.synchronize()
+        reset_kv_runtime_state(model)
+        torch.cuda.reset_peak_memory_stats()
         start_time = time.perf_counter()
         if idx == 0:
             with torch.profiler.profile(
@@ -317,6 +326,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
             torch.cuda.synchronize()
 
         step_latency_s = time.perf_counter() - start_time
+        generate_peak_mbs.append(torch.cuda.max_memory_allocated() / 1024**2)
         latencies_s.append(step_latency_s)
         
         # Calculate decode latency as total - prefill
@@ -348,7 +358,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
 
     # Memory summary after all inference
     torch.cuda.synchronize()
-    peak_mb = torch.cuda.max_memory_allocated() / 1024**2
+    peak_mb = max(generate_peak_mbs) if generate_peak_mbs else torch.cuda.max_memory_allocated() / 1024**2
     peak_gb = peak_mb / 1024
     current_mb = torch.cuda.memory_allocated() / 1024**2
     avg_ctx = sum(context_lengths) / len(context_lengths) if context_lengths else 0
@@ -378,6 +388,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
     print(f"\n{'='*50}")
     print(f"=== INFERENCE SUMMARY ({method if compress else 'full'}) ===")
     print(f"Peak GPU memory allocated:    {peak_mb:.1f} MB  ({peak_gb:.2f} GB)")
+    print(f"Peak GPU source:              generate() only")
     print(f"Current GPU memory allocated: {current_mb:.1f} MB")
     print(f"Memory for KV cache (approx): {peak_mb - memory_after_load_mb:.1f} MB")
     print(f"Average context length:       {avg_ctx:.0f} tokens")
