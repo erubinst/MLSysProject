@@ -108,6 +108,33 @@ This is the recommended way to submit longer inference or evaluation jobs.
 | Michael | `4` | heuristic routing | `v4_20260502_164454` | [ap-QZ1Wk2M84eKGIJntqjenCX](https://modal.com/apps/huxinyu1997/main/ap-QZ1Wk2M84eKGIJntqjenCX) |
 | Michael | `5` | XGBoost router data, 100 examples per dataset | `v5_20260502_164834` | [ap-eaVZCLvPr7rREX6JZvq2w3](https://modal.com/apps/huxinyu1997/main/ap-eaVZCLvPr7rREX6JZvq2w3) |
 | Michael | `6` | heuristic routing, fixed cache state and generate-only memory | `v6_20260502_173239` | [ap-PkBinoedjo9WMYx0RvK1JR](https://modal.com/apps/huxinyu1997/main/ap-PkBinoedjo9WMYx0RvK1JR) |
+| Michael | `7` | heuristic routing, post diagnostic-prefill memory fix | `v7_20260503_032528` | [ap-b5AnUvWbuvi5kDyPiGBQR4](https://modal.com/apps/huxinyu1997/main/ap-b5AnUvWbuvi5kDyPiGBQR4) |
+| Michael | `8` | XGBoost routing using router trained from `v5_20260502_164834` | `v8_20260503_033648` | [ap-wMCiJ7RmER9aBxmseeeJWU](https://modal.com/apps/huxinyu1997/main/ap-wMCiJ7RmER9aBxmseeeJWU) |
+
+### Heuristic Routing Result: Latest Verified-Code Run
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| heuristic_routing | 28.90 | 41.18 | 56.39 | 33.53 | 40.00 | 33.69 | 20179.1 | 2.234 | 1.105 | 1.129 | 2.588 | 25.952 | 9.61 | 125.668532 | 9.555004 |
+
+Caveat: the accuracy, latency, throughput, and profiler columns are usable for this run. The memory columns are inflated by a diagnostic-prefill bookkeeping issue: the diagnostic prefill output retained its returned KV cache while the later `generate()` peak was measured. That means `Peak GPU (GB)` and `KV Cache (MB)` can include diagnostic prefill KV plus real generation KV. This is not evidence that the actual generation path required that much extra KV memory. The fix is to delete the diagnostic prefill output before resetting peak memory for `generate()`, then rerun memory collection.
+
+Analysis:
+- Accuracy is now in the expected range: `40.00` average, close to the better compressed static methods but below the static best around `40.5`.
+- The router is strong on `lcc` (`56.39`) and `qasper` (`33.53`), but weak on `gov_report` (`28.90`).
+- Average latency is low at `2.234s`, so the heuristic remains useful as a low-latency route even though it is not an accuracy win.
+
+### XGBoost Routing Result: `v8_20260503_033648`
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| xgb_routing | 32.40 | 44.06 | 56.06 | 34.44 | 41.74 | 31.53 | 17963.7 | 5.670 | 0.907 | 4.763 | 3.283 | 104.402 | 18.12 | 170.339653 | 7.168930 |
+
+Analysis:
+- This is the strongest routed result so far: `41.74` average, above the static full-precision baseline average (`41.12`) and above the heuristic router (`40.00`).
+- Gains are broad: `gov_report=32.40`, `hotpotqa=44.06`, and `qasper=34.44` are all better than the heuristic run; `lcc=56.06` remains close to the best static/routed numbers.
+- Latency is higher than heuristic routing (`5.67s` vs `2.23s`) but still in the same range as many static compressed methods.
+- Memory should be interpreted as the latest generate-path measurement. It is higher than fixed single-method static runs because the routed method can switch backend configs across examples and retains the largest observed route/runtime footprint.
 
 ### Heuristic Routing Result: `v3_20260501_013635`
 
@@ -214,12 +241,31 @@ Candidate methods:
 - `tokenkv_quest_bounds_static`
 - `tokenkv_h2o_dynamic`
 
-Collection flow:
+End-to-end flow:
+
+1. Collect candidate predictions on 100 examples per dataset:
 
 ```bash
 modal run --detach test.py::main_xgb_router_data_100 --version 1
+```
+
+This prints a training-data run tag such as `v5_20260502_164834`.
+
+2. Evaluate candidate predictions:
+
+```bash
 modal run --detach test.py::main_eval_xgb_router_data --run-tag <run_tag>
+```
+
+3. Verify all candidate eval artifacts and metrics are present:
+
+```bash
 modal run --detach test.py::main_verify_eval_xgb_router_data --run-tag <run_tag>
+```
+
+4. Build per-example supervised router rows:
+
+```bash
 modal run --detach test.py::main_build_xgb_router_data --run-tag <run_tag>
 ```
 
@@ -237,6 +283,87 @@ Output:
 ```
 
 Each JSONL row contains prompt-window features, per-candidate prediction score, latency fields when available, and the best candidate label. Use `--latency-weight` on `main_build_xgb_router_data` to label by `score - latency_weight * latency_s`; the default labels by score only.
+
+Example using the completed router-data run:
+
+```bash
+modal run --detach test.py::main_eval_xgb_router_data --run-tag v5_20260502_164834
+modal run --detach test.py::main_verify_eval_xgb_router_data --run-tag v5_20260502_164834
+modal run --detach test.py::main_build_xgb_router_data --run-tag v5_20260502_164834
+```
+
+### Train and Deploy XGBoost Router
+Train the router after `xgb_candidates.jsonl` has been built:
+
+```bash
+modal run --detach test.py::main_train_xgb_router --run-tag <router_data_run_tag>
+```
+
+For the completed router-data run:
+
+```bash
+modal run --detach test.py::main_train_xgb_router --run-tag v5_20260502_164834
+```
+
+By default, training uses task-agnostic prompt features only: `max_gen`, prompt length/statistics, keyword-marker counts, and example length. It does not use dataset name unless explicitly enabled:
+
+```bash
+modal run --detach test.py::main_train_xgb_router --run-tag <router_data_run_tag> --include-dataset
+```
+
+Test-time router features:
+- `max_gen`: configured max output tokens for the prompt/task.
+- `prompt_chars`: full formatted prompt character count.
+- `sample_chars`: character count of the sampled prompt window used for marker detection.
+- `code_marker_hits`: count of code markers in the sampled prompt window.
+- `summary_marker_hits`: count of summarization markers in the sampled prompt window.
+- `qa_marker_hits`: count of QA/passage markers in the sampled prompt window.
+- `newline_ratio`: fraction of prompt characters that are newlines.
+- `digit_ratio`: fraction of prompt characters that are digits.
+- `punct_ratio`: fraction of prompt characters that are punctuation.
+- `length`: LongBench-provided input length metadata when present.
+
+Candidate scores, candidate latencies, generated tokens, context length, and prediction text are not test-time router inputs. They are used only during data construction to choose the supervised label, usually `best_utility_method` or `best_score_method`.
+
+The trained artifacts are saved in:
+
+```text
+/models/runs/<router_data_run_tag>/results/router_data/xgb_router.json
+/models/runs/<router_data_run_tag>/results/router_data/xgb_router_metadata.json
+/models/runs/<router_data_run_tag>/results/router_data/xgb_router_metrics.json
+```
+
+Validate the deployed router on one example:
+
+```bash
+modal run --detach test.py::main_validate_xgb_routing --router-run-tag <router_data_run_tag> --version <version>
+```
+
+Example:
+
+```bash
+modal run --detach test.py::main_validate_xgb_routing --router-run-tag v5_20260502_164834 --version 1
+```
+
+Run full routed inference, then eval and verify:
+
+```bash
+modal run --detach test.py::main_xgb_routing --router-run-tag <router_data_run_tag> --version <version>
+modal run --detach test.py::main_eval_xgb_routing --run-tag <xgb_routing_run_tag>
+modal run --detach test.py::main_verify_eval_xgb_routing --run-tag <xgb_routing_run_tag>
+modal run --detach test.py::main_csv --run-tag <xgb_routing_run_tag>
+```
+
+Example:
+
+```bash
+modal run --detach test.py::main_xgb_routing --router-run-tag v5_20260502_164834 --version 1
+modal run --detach test.py::main_eval_xgb_routing --run-tag <xgb_routing_run_tag>
+modal run --detach test.py::main_verify_eval_xgb_routing --run-tag <xgb_routing_run_tag>
+modal run --detach test.py::main_csv --run-tag <xgb_routing_run_tag>
+```
+
+Deployment flow: `main_xgb_routing` loads `/models/runs/<router_data_run_tag>/results/router_data/xgb_router.json`, predicts a candidate method per example, applies that candidate's existing KV config, and saves normal LongBench predictions under the new `<xgb_routing_run_tag>`.
 
 ## One-Example Validation
 There is a lightweight Modal validation flow for sanity checking method wiring before or after running the full benchmark.

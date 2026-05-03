@@ -258,7 +258,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
         route_reason = None
         if compress:
             layers = len(model.model.layers)
-            if method == 'heuristic_routing':
+            if method in ('heuristic_routing', 'xgb_routing'):
                 pass
             elif method == 'snapkv':
                 if not isinstance(window_sizes, list):
