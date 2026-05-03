@@ -110,19 +110,20 @@ This is the recommended way to submit longer inference or evaluation jobs.
 | Michael | `6` | heuristic routing, fixed cache state and generate-only memory | `v6_20260502_173239` | [ap-PkBinoedjo9WMYx0RvK1JR](https://modal.com/apps/huxinyu1997/main/ap-PkBinoedjo9WMYx0RvK1JR) |
 | Michael | `7` | heuristic routing, post diagnostic-prefill memory fix | `v7_20260503_032528` | [ap-b5AnUvWbuvi5kDyPiGBQR4](https://modal.com/apps/huxinyu1997/main/ap-b5AnUvWbuvi5kDyPiGBQR4) |
 | Michael | `8` | XGBoost routing using router trained from `v5_20260502_164834` | `v8_20260503_033648` | [ap-wMCiJ7RmER9aBxmseeeJWU](https://modal.com/apps/huxinyu1997/main/ap-wMCiJ7RmER9aBxmseeeJWU) |
+| Michael | `9` | refreshed static methods, no `clusterkv_*`, latest metrics | `v9_20260503_152041` | [ap-Rin9rd1bM7WnEPRffR5acR](https://modal.com/apps/huxinyu1997/main/ap-Rin9rd1bM7WnEPRffR5acR) |
 
 ### Heuristic Routing Result: Latest Verified-Code Run
 
 | Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| heuristic_routing | 28.90 | 41.18 | 56.39 | 33.53 | 40.00 | 33.69 | 20179.1 | 2.234 | 1.105 | 1.129 | 2.588 | 25.952 | 9.61 | 125.668532 | 9.555004 |
+| heuristic_routing | 28.97 | 41.18 | 56.21 | 33.53 | 39.97 | 31.53 | 17963.7 | 7.848 | 0.950 | 6.898 | 3.446 | 182.160 | 14.80 | 170.623406 | 5.701121 |
 
-Caveat: the accuracy, latency, throughput, and profiler columns are usable for this run. The memory columns are inflated by a diagnostic-prefill bookkeeping issue: the diagnostic prefill output retained its returned KV cache while the later `generate()` peak was measured. That means `Peak GPU (GB)` and `KV Cache (MB)` can include diagnostic prefill KV plus real generation KV. This is not evidence that the actual generation path required that much extra KV memory. The fix is to delete the diagnostic prefill output before resetting peak memory for `generate()`, then rerun memory collection.
+This row is from `/models/runs/v7_20260503_032528/results/summary.csv` after the diagnostic-prefill output was deleted before generate-path peak-memory measurement. The memory columns are now comparable to the XGBoost routed run, but still represent extra generate-path peak memory rather than pure retained KV size.
 
 Analysis:
-- Accuracy is now in the expected range: `40.00` average, close to the better compressed static methods but below the static best around `40.5`.
-- The router is strong on `lcc` (`56.39`) and `qasper` (`33.53`), but weak on `gov_report` (`28.90`).
-- Average latency is low at `2.234s`, so the heuristic remains useful as a low-latency route even though it is not an accuracy win.
+- Accuracy is in the expected range: `39.97` average, below the better compressed static methods and below XGBoost routing.
+- The router is strong on `lcc` (`56.21`) and `qasper` (`33.53`), but weak on `gov_report` (`28.97`).
+- Average latency is `7.848s`, with a large max decode tail (`182.160s`), so this run is no longer a clear latency win after using the corrected measurement path.
 
 ### XGBoost Routing Result: `v8_20260503_033648`
 
