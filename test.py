@@ -18,6 +18,7 @@ image = (
     )
     .pip_install("transformers==4.37.0", "huggingface-hub==0.36.2")
     .pip_install("fschat==0.2.36", "sentencepiece", "protobuf")
+    .pip_install("xgboost", "scikit-learn")
     .pip_install(
         "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/flash_attn-2.6.3+cu121torch2.4-cp311-cp311-linux_x86_64.whl"
     )
@@ -544,6 +545,11 @@ METHODS = {
         "extra_args": ["--method", "heuristic_routing"],
         "model_name": "mistral-7B-instruct-v0.2heuristic_routing",
     },
+    "xgb_routing": {
+        "script": "pred_snap.py",
+        "extra_args": ["--method", "xgb_routing"],
+        "model_name": "mistral-7B-instruct-v0.2xgb_routing",
+    },
 }
 
 # Top-k ablation: synthetic method id is "{base_method}__kret{k_ret}" where
@@ -627,7 +633,7 @@ def _execute_inference_run(
     run_tag: str,
     limit: int | None = None,
     sample_offset: int = 0,
-):
+    router_run_tag: str = ""):
     import json
     import os
     import re
@@ -644,6 +650,10 @@ def _execute_inference_run(
         "--write_model_name",
         cfg["model_name"],
     ] + cfg["extra_args"]
+    if method == "xgb_routing":
+        if not router_run_tag:
+            raise ValueError("xgb_routing requires router_run_tag")
+        cmd += ["--xgb_router_dir", f"/models/runs/{router_run_tag}/results/router_data"]
     if limit is not None:
         cmd += ["--limit", str(limit), "--sample_offset", str(sample_offset)]
 
@@ -736,6 +746,7 @@ def _execute_inference_run(
                 "routed_method": cfg.get("routed_method"),
                 "limit": limit,
                 "sample_offset": sample_offset,
+                "router_run_tag": router_run_tag,
                 "returncode": result.returncode,
             },
             f,
@@ -787,7 +798,7 @@ def run_inference_topk(
     secrets=[modal.Secret.from_name("huggingface")],
     timeout=2400
 )
-def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset: int = VALIDATION_SAMPLE_OFFSET, run_tag: str = "unversioned"):
+def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset: int = VALIDATION_SAMPLE_OFFSET, run_tag: str = "unversioned", router_run_tag: str = ""):
     import json, os, re, shutil, subprocess
 
     cfg = _resolve_method_config(method, dataset)
@@ -799,6 +810,10 @@ def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset
         "--sample_offset", str(sample_offset),
         "--write_model_name", cfg["model_name"],
     ] + cfg["extra_args"]
+    if method == "xgb_routing":
+        if not router_run_tag:
+            raise ValueError("xgb_routing requires router_run_tag")
+        cmd += ["--xgb_router_dir", f"/models/runs/{router_run_tag}/results/router_data"]
 
     print(f"\n{'='*50}")
     print(f"Validating {method} on {dataset} sample {sample_offset}")
@@ -843,6 +858,7 @@ def run_validation(method: str, dataset: str = VALIDATION_DATASET, sample_offset
         "sample_offset": sample_offset,
         "command": cmd,
         "routed_method": cfg.get("routed_method"),
+        "router_run_tag": router_run_tag,
         "ran_successfully": result.returncode == 0,
         "pred_file_found": record is not None,
     }
@@ -900,6 +916,21 @@ def submit_inference_limited_batch(methods: list[str], run_tag: str, limit: int,
             run_inference.spawn(method, dataset, run_tag, limit, sample_offset)
             submitted += 1
     print(f"Submitted {submitted} limited inference jobs for run {run_tag}.")
+    return submitted
+
+
+@app.function(
+    image=image,
+    volumes={"/models": volume},
+    timeout=1800
+)
+def submit_xgb_routing_batch(run_tag: str, router_run_tag: str):
+    submitted = 0
+    for dataset in DATASETS:
+        print(f"Submitting xgb_routing / {dataset} using router {router_run_tag}...")
+        run_inference.spawn("xgb_routing", dataset, run_tag, None, 0, router_run_tag)
+        submitted += 1
+    print(f"Submitted {submitted} xgb_routing inference jobs for run {run_tag}.")
     return submitted
 
 
@@ -1071,6 +1102,7 @@ def generate_csv(run_tag: str):
     for method in [
         "baseline",
         "heuristic_routing",
+        "xgb_routing",
         "snapkv_static",
         "quest_static",
         "clusterattn_static",
@@ -1379,6 +1411,144 @@ def generate_xgb_router_dataset(run_tag: str, methods: list[str] | None = None, 
 @app.function(
     image=image,
     volumes={"/models": volume},
+    timeout=900
+)
+def train_xgb_router(run_tag: str, label_field: str = "best_utility_method", include_dataset: bool = False):
+    import json, os
+    from collections import Counter
+
+    import numpy as np
+    from sklearn.metrics import accuracy_score, classification_report
+    from sklearn.model_selection import train_test_split
+    from xgboost import XGBClassifier
+
+    router_dir = f"{_results_dir(run_tag)}/router_data"
+    data_path = f"{router_dir}/xgb_candidates.jsonl"
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Missing router data: {data_path}")
+
+    feature_names = [
+        "max_gen",
+        "prompt_chars",
+        "sample_chars",
+        "code_marker_hits",
+        "summary_marker_hits",
+        "qa_marker_hits",
+        "newline_ratio",
+        "digit_ratio",
+        "punct_ratio",
+        "length",
+    ]
+    dataset_names = DATASETS if include_dataset else []
+    feature_names += [f"dataset__{dataset}" for dataset in dataset_names]
+
+    X = []
+    y_labels = []
+    with open(data_path, encoding="utf-8") as f:
+        for line in f:
+            record = json.loads(line)
+            label = record.get(label_field)
+            if not label:
+                continue
+            features = record.get("features", {})
+            row = [
+                float(features.get("max_gen") or 0),
+                float(features.get("prompt_chars") or 0),
+                float(features.get("sample_chars") or 0),
+                float(features.get("code_marker_hits") or 0),
+                float(features.get("summary_marker_hits") or 0),
+                float(features.get("qa_marker_hits") or 0),
+                float(features.get("newline_ratio") or 0),
+                float(features.get("digit_ratio") or 0),
+                float(features.get("punct_ratio") or 0),
+                float(record.get("length") or 0),
+            ]
+            if include_dataset:
+                row.extend(1.0 if record.get("dataset") == dataset else 0.0 for dataset in DATASETS)
+            X.append(row)
+            y_labels.append(label)
+
+    if not X:
+        raise ValueError(f"No usable rows found in {data_path}")
+
+    label_names = sorted(set(y_labels))
+    if len(label_names) < 2:
+        raise ValueError(f"Need at least two router labels to train XGBoost, found: {label_names}")
+    label_to_id = {label: idx for idx, label in enumerate(label_names)}
+    y = np.array([label_to_id[label] for label in y_labels], dtype=np.int64)
+    X = np.array(X, dtype=np.float32)
+
+    stratify = y if min(Counter(y).values()) >= 2 else None
+    X_train, X_val, y_train, y_val = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=stratify,
+    )
+
+    model = XGBClassifier(
+        objective="multi:softprob",
+        num_class=len(label_names),
+        n_estimators=200,
+        max_depth=3,
+        learning_rate=0.05,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        eval_metric="mlogloss",
+        tree_method="hist",
+        random_state=42,
+    )
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_val)
+    accuracy = float(accuracy_score(y_val, y_pred))
+    report = classification_report(
+        y_val,
+        y_pred,
+        labels=list(range(len(label_names))),
+        target_names=label_names,
+        zero_division=0,
+        output_dict=True,
+    )
+
+    model_path = f"{router_dir}/xgb_router.json"
+    metadata_path = f"{router_dir}/xgb_router_metadata.json"
+    metrics_path = f"{router_dir}/xgb_router_metrics.json"
+    model.save_model(model_path)
+
+    metadata = {
+        "run_tag": run_tag,
+        "label_field": label_field,
+        "include_dataset": include_dataset,
+        "feature_names": feature_names,
+        "label_names": label_names,
+        "label_to_id": label_to_id,
+        "model_path": model_path,
+        "rows": int(X.shape[0]),
+        "train_rows": int(X_train.shape[0]),
+        "val_rows": int(X_val.shape[0]),
+    }
+    metrics = {
+        "accuracy": accuracy,
+        "label_counts": dict(Counter(y_labels)),
+        "classification_report": report,
+    }
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+
+    print(f"Saved XGBoost router model to {model_path}")
+    print(f"Saved XGBoost router metadata to {metadata_path}")
+    print(f"Saved XGBoost router metrics to {metrics_path}")
+    print(json.dumps({"accuracy": accuracy, "label_counts": metrics["label_counts"]}, indent=2))
+    return {"model_path": model_path, "metadata_path": metadata_path, "metrics_path": metrics_path, "accuracy": accuracy}
+
+
+@app.function(
+    image=image,
+    volumes={"/models": volume},
     timeout=120
 )
 def verify_eval_complete(run_tag: str, methods: list[str] | None = None):
@@ -1559,6 +1729,42 @@ def main_verify_eval_xgb_router_data(run_tag: str):
 def main_build_xgb_router_data(run_tag: str, latency_weight: float = 0.0):
     """Build per-example XGBoost router training rows from candidate predictions."""
     generate_xgb_router_dataset.spawn(run_tag, XGB_ROUTER_CANDIDATE_METHODS, latency_weight)
+
+
+@app.local_entrypoint()
+def main_train_xgb_router(run_tag: str, label_field: str = "best_utility_method", include_dataset: bool = False):
+    """Train an XGBoost method router from built router_data/xgb_candidates.jsonl."""
+    train_xgb_router.spawn(run_tag, label_field, include_dataset)
+
+
+@app.local_entrypoint()
+def main_xgb_routing(router_run_tag: str, version: str = "1", run_tag: str = ""):
+    """Run the trained XGBoost router across all datasets."""
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    print(f"Router run tag: {router_run_tag}")
+    submit_xgb_routing_batch.spawn(resolved_run_tag, router_run_tag)
+
+
+@app.local_entrypoint()
+def main_eval_xgb_routing(run_tag: str):
+    """Eval trained XGBoost-router predictions."""
+    _submit_eval_methods(["xgb_routing"], run_tag)
+
+
+@app.local_entrypoint()
+def main_verify_eval_xgb_routing(run_tag: str):
+    """Check trained XGBoost-router eval artifacts."""
+    verify_eval_complete.spawn(run_tag, ["xgb_routing"])
+
+
+@app.local_entrypoint()
+def main_validate_xgb_routing(router_run_tag: str, version: str = "1", run_tag: str = ""):
+    """Run one-example validation for the trained XGBoost router."""
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    print(f"Router run tag: {router_run_tag}")
+    run_validation.spawn("xgb_routing", VALIDATION_DATASET, VALIDATION_SAMPLE_OFFSET, resolved_run_tag, router_run_tag)
 
 
 @app.local_entrypoint()

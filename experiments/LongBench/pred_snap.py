@@ -27,8 +27,10 @@ def parse_args(args=None):
         "internlm-7b-8k", "chatglm2-6b", "chatglm2-6b-32k", "chatglm3-6b-32k", "vicuna-v1.5-7b-16k",
         "mistral-7B-instruct-v0.2", "mistral-7B-instruct-v0.1", "llama-2-7B-32k-instruct", "mixtral-8x7B-instruct-v0.1","lwm-text-chat-1m", "lwm-text-1m"])
     parser.add_argument('--compress_args_path', type=str, default=None, help="Path to the compress args")
-    parser.add_argument('--method', type=str, default='snapkv', choices=['snapkv', 'quest', 'clusterkv', 'heuristic_routing'],
+    parser.add_argument('--method', type=str, default='snapkv', choices=['snapkv', 'quest', 'clusterkv', 'heuristic_routing', 'xgb_routing'],
                         help="Compression method to enable when --compress_args_path is provided")
+    parser.add_argument('--xgb_router_dir', type=str, default=None,
+                        help="Directory containing xgb_router.json and xgb_router_metadata.json")
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('--dataset', type=str, default='qasper', help="Dataset to evaluate on")
     parser.add_argument('--limit', type=int, default=None, help="Optional number of examples to run")
@@ -89,6 +91,10 @@ HEURISTIC_ROUTING_CONFIGS = {
         "method": "clusterkv",
         "compress_args_path": "pagekv_quest_bounds_c4096_w64_p16.json",
     },
+    "tokenkv_h2o_dynamic": {
+        "method": "clusterkv",
+        "compress_args_path": "tokenkv_h2o_dynamic_c4096_w64.json",
+    },
 }
 
 CODE_MARKERS = (
@@ -124,6 +130,52 @@ def choose_heuristic_route(prompt: str, max_gen: int):
         route = "clusterattn_recon_static"
         reason = "fallback"
     return route, reason
+
+def prompt_features(prompt: str, max_gen: int, length=None):
+    sample = (prompt[:512] + "\n" + prompt[-512:]).lower()
+    return {
+        "max_gen": max_gen,
+        "prompt_chars": len(prompt),
+        "sample_chars": len(sample),
+        "code_marker_hits": sum(marker in sample for marker in CODE_MARKERS),
+        "summary_marker_hits": sum(marker in sample for marker in SUMMARY_MARKERS),
+        "qa_marker_hits": sum(marker in sample for marker in QA_MARKERS),
+        "newline_ratio": prompt.count("\n") / max(len(prompt), 1),
+        "digit_ratio": sum(ch.isdigit() for ch in prompt) / max(len(prompt), 1),
+        "punct_ratio": sum((not ch.isalnum()) and (not ch.isspace()) for ch in prompt) / max(len(prompt), 1),
+        "length": length or 0,
+    }
+
+def load_xgb_router(router_dir: str):
+    from xgboost import XGBClassifier
+
+    model_path = os.path.join(router_dir, "xgb_router.json")
+    metadata_path = os.path.join(router_dir, "xgb_router_metadata.json")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Missing XGBoost router model: {model_path}")
+    if not os.path.exists(metadata_path):
+        raise FileNotFoundError(f"Missing XGBoost router metadata: {metadata_path}")
+
+    model = XGBClassifier()
+    model.load_model(model_path)
+    with open(metadata_path, encoding="utf-8") as f:
+        metadata = json.load(f)
+    return model, metadata
+
+def choose_xgb_route(prompt: str, max_gen: int, length, dataset: str, xgb_router):
+    model, metadata = xgb_router
+    features = prompt_features(prompt, max_gen, length)
+    row = []
+    for name in metadata["feature_names"]:
+        if name.startswith("dataset__"):
+            row.append(1.0 if name.split("__", 1)[1] == dataset else 0.0)
+        else:
+            row.append(float(features.get(name, 0) or 0))
+    pred_id = int(model.predict(np.array([row], dtype=np.float32))[0])
+    label_names = metadata["label_names"]
+    if pred_id < 0 or pred_id >= len(label_names):
+        raise ValueError(f"XGBoost router predicted invalid label id {pred_id}")
+    return label_names[pred_id], "xgb_classifier"
 
 def apply_clusterkv_config(model, compress_args):
     layers = len(model.model.layers)
@@ -179,7 +231,8 @@ def get_pred_single_gpu(data, max_length, max_gen,
                         clustering_backend=None,
                         num_block=None,
                         theta=None,
-                        routing_configs=None):
+                        routing_configs=None,
+                        xgb_router=None):
     model, tokenizer = load_model_and_tokenizer(model2path[model_name], model_name, device="cuda", compress=compress)
     device = model.device
 
@@ -241,15 +294,24 @@ def get_pred_single_gpu(data, max_length, max_gen,
                 raise ValueError(f"Compression method {method} not supported")
 
         prompt = prompt_format.format(**json_obj)
-        if compress and method == 'heuristic_routing':
-            route, route_reason = choose_heuristic_route(prompt, max_gen)
+        if compress and method in ('heuristic_routing', 'xgb_routing'):
+            if method == 'heuristic_routing':
+                route, route_reason = choose_heuristic_route(prompt, max_gen)
+            else:
+                route, route_reason = choose_xgb_route(
+                    prompt,
+                    max_gen,
+                    json_obj.get("length"),
+                    dataset,
+                    xgb_router,
+                )
             route_cfg = routing_configs[route]
             route_compress_args = route_cfg["compress_args"]
             apply_clusterkv_config(model, route_compress_args)
             routing_counts[route] = routing_counts.get(route, 0) + 1
             if idx < 5:
                 print(
-                    "HEURISTIC_ROUTE "
+                    f"{method.upper()}_ROUTE "
                     f"example={idx} route={route} reason={route_reason} max_gen={max_gen} "
                     f"capacity={route_compress_args.get('max_capacity_prompt')} "
                     f"window={route_compress_args.get('window_size')} "
@@ -294,10 +356,14 @@ def get_pred_single_gpu(data, max_length, max_gen,
         reset_kv_runtime_state(model)
         prefill_start = time.perf_counter()
         with torch.no_grad():
-            _ = model(input.input_ids, attention_mask=input.get("attention_mask"))
+            prefill_output = model(input.input_ids, attention_mask=input.get("attention_mask"))
         torch.cuda.synchronize()
         prefill_latency_s = time.perf_counter() - prefill_start
         prefill_latencies_s.append(prefill_latency_s)
+        # The diagnostic prefill returns a cache-bearing output object. Drop it
+        # before measuring generate() peak memory, otherwise the diagnostic KV
+        # cache is counted together with the real generation KV cache.
+        del prefill_output
         
         # Measure total latency (prefill + decode)
         torch.cuda.synchronize()
@@ -351,8 +417,14 @@ def get_pred_single_gpu(data, max_length, max_gen,
                 "generated_tokens": generated_token_count,
             }
             if route is not None:
-                record["heuristic_route"] = route
-                record["heuristic_route_reason"] = route_reason
+                record["route"] = route
+                record["route_reason"] = route_reason
+                if method == "heuristic_routing":
+                    record["heuristic_route"] = route
+                    record["heuristic_route_reason"] = route_reason
+                elif method == "xgb_routing":
+                    record["xgb_route"] = route
+                    record["xgb_route_reason"] = route_reason
             json.dump(record, f, ensure_ascii=False)
             f.write('\n')
 
@@ -409,7 +481,7 @@ def get_pred_single_gpu(data, max_length, max_gen,
     if profiled_tflops_per_s is not None:
         print(f"Profiled TFLOPs/s (1st example): {profiled_tflops_per_s:.6f}")
     if routing_counts:
-        print(f"Heuristic route counts:        {json.dumps(routing_counts, sort_keys=True)}")
+        print(f"Route counts:                  {json.dumps(routing_counts, sort_keys=True)}")
     print(f"{'='*50}\n")
 
 
@@ -484,10 +556,11 @@ if __name__ == '__main__':
 
     dataset = args.dataset
     routing_configs = None
-    if args.method == "heuristic_routing":
+    xgb_router = None
+    if args.method in ("heuristic_routing", "xgb_routing"):
         compress = True
         compress_args = {}
-        write_model_name = args.write_model_name or (model_name + "heuristic_routing")
+        write_model_name = args.write_model_name or (model_name + args.method)
         routing_configs = {}
         for route_name, route_spec in HEURISTIC_ROUTING_CONFIGS.items():
             with open(os.path.join("config", route_spec["compress_args_path"]), "r") as f:
@@ -495,6 +568,10 @@ if __name__ == '__main__':
                     "method": route_spec["method"],
                     "compress_args": json.load(f),
                 }
+        if args.method == "xgb_routing":
+            if not args.xgb_router_dir:
+                raise ValueError("--xgb_router_dir is required for --method xgb_routing")
+            xgb_router = load_xgb_router(args.xgb_router_dir)
         replace_llama_cluster()
         replace_mistral_cluster()
         replace_mixtral_cluster()
@@ -543,7 +620,10 @@ if __name__ == '__main__':
     if compress_args is not None:
         get_pred_single_gpu(
             data_all, max_length, max_gen, prompt_format, dataset, model_name,
-            model2path, out_path, compress, args.method, routing_configs=routing_configs, **compress_args
+            model2path, out_path, compress, args.method,
+            routing_configs=routing_configs,
+            xgb_router=xgb_router,
+            **compress_args
         )
     else:
         get_pred_single_gpu(
