@@ -122,6 +122,14 @@ METHODS = {
         "extra_args": [],
         "model_name": "mistral-7B-instruct-v0.2",
     },
+    "baseline_clusterpath_static": {
+        "script": "pred_snap.py",
+        "extra_args": [
+            "--method", "clusterkv",
+            "--compress_args_path", "baseline_clusterpath_fullkv.json",
+        ],
+        "model_name": "mistral-7B-instruct-v0.2baseline_clusterpath_fullkv",
+    },
     "snapkv_static": {
         "script": "pred_snap.py",
         "extra_args": ["--compress_args_path", "ablation_c4096_w32_k7_maxpool.json"],
@@ -671,6 +679,10 @@ def _execute_inference_run(
     print(result.stdout)
     if result.stderr:
         print(result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Inference failed for {method} / {dataset} with exit code {result.returncode}"
+        )
 
     pred_dir = _predictions_dir(run_tag, method)
     os.makedirs(pred_dir, exist_ok=True)
@@ -693,6 +705,26 @@ def _execute_inference_run(
     profiled_flops_match = re.search(r"Profiled FLOPs \(1st example\):\s+([0-9.]+)", result.stdout)
     profiled_tflops_match = re.search(r"Profiled TFLOPs \(1st example\):\s+([0-9.]+)", result.stdout)
     profiled_tflops_per_s_match = re.search(r"Profiled TFLOPs/s \(1st example\):\s+([0-9.]+)", result.stdout)
+
+    required_metric_matches = {
+        "peak GPU memory": peak_match,
+        "KV cache memory": kv_match,
+        "total latency": total_latency_match,
+        "average latency": avg_latency_match,
+        "throughput": throughput_match,
+        "profiled FLOPs": profiled_flops_match,
+        "profiled TFLOPs": profiled_tflops_match,
+        "profiled TFLOPs/s": profiled_tflops_per_s_match,
+    }
+    missing_metric_names = [
+        name for name, match in required_metric_matches.items()
+        if match is None
+    ]
+    if missing_metric_names:
+        raise RuntimeError(
+            f"Inference for {method} / {dataset} completed without required metric logs: "
+            + ", ".join(missing_metric_names)
+        )
 
     peak_gb = float(peak_match.group(2)) if peak_match else None
     kv_cache_mb = float(kv_match.group(1)) if kv_match else None
@@ -766,6 +798,18 @@ def _execute_inference_run(
     timeout=7200
 )
 def run_inference(method: str, dataset: str, run_tag: str, limit: int | None = None, sample_offset: int = 0):
+    cfg = _resolve_method_config(method, dataset)
+    _execute_inference_run(method, cfg, dataset, run_tag, limit, sample_offset)
+
+
+@app.function(
+    gpu="A100-80GB",
+    image=image,
+    volumes={"/models": volume},
+    secrets=[modal.Secret.from_name("huggingface")],
+    timeout=7200
+)
+def run_inference_a100_80gb(method: str, dataset: str, run_tag: str, limit: int | None = None, sample_offset: int = 0):
     cfg = _resolve_method_config(method, dataset)
     _execute_inference_run(method, cfg, dataset, run_tag, limit, sample_offset)
 
@@ -1101,6 +1145,7 @@ def generate_csv(run_tag: str):
 
     for method in [
         "baseline",
+        "baseline_clusterpath_static",
         "heuristic_routing",
         "xgb_routing",
         "snapkv_static",
@@ -1866,6 +1911,22 @@ def main_baseline(version: str = "1", run_tag: str = ""):
         run_inference.spawn("baseline", dataset, resolved_run_tag)
 
 @app.local_entrypoint()
+def main_baseline_clusterpath_static(version: str = "1", run_tag: str = ""):
+    """Run baseline through the generalized ClusterKV path with compression disabled."""
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference.spawn("baseline_clusterpath_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
+def main_baseline_clusterpath_static_a100_80gb(version: str = "1", run_tag: str = ""):
+    """Run the no-compression cluster-path baseline control on A100-80GB."""
+    resolved_run_tag = _build_run_tag(version, run_tag)
+    print(f"Run tag: {resolved_run_tag}")
+    for dataset in DATASETS:
+        run_inference_a100_80gb.spawn("baseline_clusterpath_static", dataset, resolved_run_tag)
+
+@app.local_entrypoint()
 def main_snapkv(version: str = "1", run_tag: str = ""):
     resolved_run_tag = _build_run_tag(version, run_tag)
     print(f"Run tag: {resolved_run_tag}")
@@ -2379,6 +2440,11 @@ def main_validate_clusterkv_random_spherical_static(version: str = "1", run_tag:
 def main_eval_baseline(run_tag: str):
     for dataset in DATASETS:
         run_eval.spawn("baseline", dataset, run_tag)
+
+@app.local_entrypoint()
+def main_eval_baseline_clusterpath_static(run_tag: str):
+    for dataset in DATASETS:
+        run_eval.spawn("baseline_clusterpath_static", dataset, run_tag)
 
 @app.local_entrypoint()
 def main_eval_snapkv(run_tag: str):

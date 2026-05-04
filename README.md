@@ -111,6 +111,72 @@ This is the recommended way to submit longer inference or evaluation jobs.
 | Michael | `7` | heuristic routing, post diagnostic-prefill memory fix | `v7_20260503_032528` | [ap-b5AnUvWbuvi5kDyPiGBQR4](https://modal.com/apps/huxinyu1997/main/ap-b5AnUvWbuvi5kDyPiGBQR4) |
 | Michael | `8` | XGBoost routing using router trained from `v5_20260502_164834` | `v8_20260503_033648` | [ap-wMCiJ7RmER9aBxmseeeJWU](https://modal.com/apps/huxinyu1997/main/ap-wMCiJ7RmER9aBxmseeeJWU) |
 | Michael | `9` | refreshed static methods, no `clusterkv_*`, latest metrics | `v9_20260503_152041` | [ap-Rin9rd1bM7WnEPRffR5acR](https://modal.com/apps/huxinyu1997/main/ap-Rin9rd1bM7WnEPRffR5acR) |
+| Michael | `12` | baseline cluster-path control on A100-80GB | `v12_20260504_042828` | pending |
+
+### Refreshed Static Result: `v9_20260503_152041`
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 25.93 | 12223.1 | 8.130 | 0.854 | 7.276 | 2.959 | 93.611 | 13.57 | 169.639661 | 6.592069 |
+| snapkv_static | 30.52 | 42.31 | 55.98 | 33.38 | 40.55 | 21.87 | 8071.6 | 6.084 | 0.879 | 5.205 | 3.012 | 89.932 | 15.55 | 169.902572 | 6.899190 |
+| quest_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 21.87 | 8071.6 | 6.177 | 0.888 | 5.289 | 3.057 | 111.505 | 15.20 | 170.151672 | 6.470891 |
+| clusterattn_static | 30.30 | 42.69 | 55.82 | 33.19 | 40.50 | 31.53 | 17963.7 | 6.377 | 1.012 | 5.364 | 3.272 | 129.804 | 14.75 | 170.492271 | 5.259820 |
+| clusterattn_quest_bounds_static | 30.52 | 42.17 | 55.58 | 33.53 | 40.45 | 31.53 | 17963.7 | 7.123 | 1.067 | 6.056 | 3.331 | 148.881 | 14.00 | 170.336097 | 5.080633 |
+| clusterattn_snapkv_static | 30.30 | 42.69 | 55.82 | 33.19 | 40.50 | 31.53 | 17963.7 | 7.222 | 1.008 | 6.214 | 3.276 | 151.226 | 13.79 | 170.492271 | 5.088779 |
+| clusterattn_h2o_static | 29.98 | 40.33 | 55.86 | 32.27 | 39.61 | 31.53 | 17963.2 | 6.395 | 0.991 | 5.404 | 3.270 | 78.564 | 15.54 | 169.741290 | 6.079391 |
+| clusterattn_recon_static | 30.48 | 42.10 | 56.21 | 33.47 | 40.56 | 31.53 | 17962.9 | 5.863 | 0.994 | 4.869 | 3.302 | 72.350 | 16.59 | 169.579216 | 5.969799 |
+| clusterattn_expected_attention_static | 30.24 | 42.24 | 55.77 | 32.54 | 40.20 | 31.53 | 17963.2 | 5.926 | 1.001 | 4.925 | 3.285 | 111.118 | 14.76 | 170.097451 | 4.617068 |
+| clusterattn_random_static | 21.93 | 26.24 | 54.31 | 30.81 | 33.32 | 31.53 | 17963.2 | 8.474 | 0.973 | 7.501 | 3.239 | 169.351 | 15.13 | 170.624572 | 5.886126 |
+| pagekv_quest_bounds_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 31.53 | 17962.9 | 6.641 | 0.887 | 5.754 | 3.139 | 118.087 | 16.43 | 170.151672 | 7.812696 |
+| pagekv_snapkv_static | 30.91 | 42.40 | 55.68 | 32.93 | 40.48 | 31.53 | 17962.9 | 7.133 | 0.884 | 6.249 | 3.145 | 147.268 | 14.86 | 170.481604 | 6.921557 |
+| pagekv_h2o_static | 29.92 | 42.64 | 55.63 | 32.47 | 40.16 | 31.53 | 17962.9 | 6.410 | 0.903 | 5.507 | 3.171 | 139.668 | 15.13 | 170.498640 | 7.545716 |
+| pagekv_recon_static | 29.45 | 37.78 | 56.01 | 30.24 | 38.37 | 31.53 | 17962.9 | 6.428 | 0.891 | 5.538 | 3.177 | 128.231 | 17.16 | 170.560570 | 7.981664 |
+| pagekv_expected_attention_static | 30.37 | 42.75 | 55.83 | 31.19 | 40.03 | 31.53 | 17962.9 | 5.475 | 0.900 | 4.576 | 3.181 | 81.564 | 16.25 | 169.788212 | 7.170652 |
+| pagekv_random_static | 23.44 | 29.52 | 54.74 | 31.93 | 34.91 | 31.53 | 17962.9 | 6.616 | 0.881 | 5.735 | 3.129 | 134.320 | 16.35 | 170.642350 | 7.537026 |
+| tokenkv_quest_bounds_static | 29.76 | 41.91 | 55.82 | 32.97 | 40.12 | 31.53 | 17963.7 | 5.752 | 0.868 | 4.883 | 3.087 | 114.879 | 16.29 | 170.318319 | 7.091499 |
+| tokenkv_snapkv_static | 30.34 | 42.52 | 55.79 | 33.01 | 40.41 | 31.53 | 17963.7 | 4.973 | 0.901 | 4.071 | 3.162 | 105.885 | 18.14 | 170.531383 | 6.992071 |
+| tokenkv_h2o_static | 30.03 | 40.08 | 55.86 | 32.27 | 39.56 | 31.53 | 17963.7 | 6.341 | 0.883 | 5.458 | 3.119 | 76.120 | 15.97 | 169.741290 | 7.630256 |
+| tokenkv_recon_static | 30.48 | 42.10 | 56.21 | 33.47 | 40.56 | 31.53 | 17962.9 | 6.787 | 0.877 | 5.910 | 3.114 | 78.809 | 14.95 | 169.579216 | 7.233228 |
+| tokenkv_expected_attention_static | 30.80 | 41.33 | 55.97 | 32.82 | 40.23 | 31.53 | 17963.2 | 5.849 | 0.880 | 4.969 | 3.071 | 122.082 | 15.49 | 170.453014 | 7.047233 |
+| tokenkv_random_static | 21.93 | 26.24 | 54.31 | 30.81 | 33.32 | 31.53 | 17963.7 | 7.689 | 0.872 | 6.818 | 3.086 | 147.864 | 17.53 | 170.624572 | 7.663775 |
+
+Full CSV: `/models/runs/v9_20260503_152041/results/summary.csv`.
+
+Analysis:
+- Accuracy is stable relative to the earlier static run. The best average remains `40.56`, reached by `clusterattn_recon_static` and `tokenkv_recon_static`.
+- `baseline` is still the highest overall score at `41.12`, but compressed static methods are close while reducing memory relative to full precision for standalone `snapkv_static`/`quest_static`.
+- The generalized `clusterattn`/`pagekv`/`tokenkv` backend now reports about `31.53 GB` peak and `~17.96 GB` extra generate-path memory. This should be interpreted as extra generate-path peak memory, not pure retained KV size.
+- `tokenkv_snapkv_static` is the fastest useful compressed static method in this refresh (`4.973s`, `18.14 tok/s`) while keeping average accuracy at `40.41`.
+- Total profiled TFLOPs is effectively unchanged across static methods, so systems differences are mostly visible in memory, latency, throughput, and TFLOPs/s.
+
+### Merged Static Result: `v1_20260427_030527` + `v9_20260503_152041`
+
+For columns present in both static runs, this table reports the arithmetic mean. For columns missing from the earlier run, it uses the `v9_20260503_152041` value. The same data is available to `analysis.py` at `figures/static_merged_v1_v9.csv`; when `analysis.py` is run without `--static`, it now reads this merged README table by default.
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 25.93 | 12223.1 | 7.931 | 0.854 | 7.276 | 2.959 | 93.611 | 14.59 | 169.639661 | 6.816846 |
+| snapkv_static | 30.52 | 42.31 | 55.98 | 33.38 | 40.55 | 21.87 | 8071.6 | 6.050 | 0.879 | 5.205 | 3.012 | 89.932 | 15.07 | 169.902572 | 5.913721 |
+| quest_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 21.87 | 8071.6 | 5.787 | 0.888 | 5.289 | 3.057 | 111.505 | 16.23 | 170.151672 | 6.910643 |
+| clusterattn_static | 30.30 | 42.69 | 55.82 | 33.19 | 40.50 | 26.70 | 13017.7 | 7.117 | 1.012 | 5.364 | 3.272 | 129.804 | 14.32 | 170.492271 | 4.954475 |
+| clusterattn_quest_bounds_static | 30.52 | 42.17 | 55.58 | 33.53 | 40.45 | 26.70 | 13017.7 | 6.338 | 1.067 | 6.056 | 3.331 | 148.881 | 15.65 | 170.336097 | 4.957190 |
+| clusterattn_snapkv_static | 30.30 | 42.69 | 55.82 | 33.19 | 40.50 | 26.70 | 13017.7 | 7.528 | 1.008 | 6.214 | 3.276 | 151.226 | 13.59 | 170.492271 | 4.918249 |
+| clusterattn_h2o_static | 29.98 | 40.33 | 55.86 | 32.27 | 39.61 | 26.70 | 13017.4 | 5.982 | 0.991 | 5.404 | 3.270 | 78.564 | 16.31 | 169.741290 | 5.596986 |
+| clusterattn_recon_static | 30.48 | 42.10 | 56.21 | 33.47 | 40.56 | 26.70 | 13017.2 | 5.619 | 0.994 | 4.869 | 3.302 | 72.350 | 17.41 | 169.579216 | 5.526775 |
+| clusterattn_expected_attention_static | 30.20 | 42.18 | 55.78 | 32.51 | 40.17 | 26.70 | 13017.4 | 5.612 | 1.001 | 4.925 | 3.285 | 111.118 | 15.75 | 169.962325 | 5.044586 |
+| clusterattn_random_static | 22.03 | 24.84 | 54.59 | 29.85 | 32.83 | 26.70 | 13017.4 | 8.392 | 0.973 | 7.501 | 3.239 | 169.351 | 15.51 | 170.624572 | 5.590876 |
+| pagekv_quest_bounds_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 26.70 | 13017.2 | 6.107 | 0.887 | 5.754 | 3.139 | 118.087 | 16.63 | 170.151672 | 7.229063 |
+| pagekv_snapkv_static | 30.91 | 42.40 | 55.68 | 32.93 | 40.48 | 26.70 | 13017.2 | 7.024 | 0.884 | 6.249 | 3.145 | 147.268 | 14.64 | 170.481604 | 7.307567 |
+| pagekv_h2o_static | 29.92 | 42.64 | 55.63 | 32.47 | 40.16 | 26.70 | 13017.2 | 5.692 | 0.903 | 5.507 | 3.171 | 139.668 | 16.93 | 170.498640 | 7.203542 |
+| pagekv_recon_static | 29.45 | 37.78 | 56.01 | 30.24 | 38.37 | 26.70 | 13017.2 | 7.222 | 0.891 | 5.538 | 3.177 | 128.231 | 16.07 | 170.560570 | 7.363918 |
+| pagekv_expected_attention_static | 29.91 | 42.53 | 55.70 | 31.62 | 39.94 | 26.70 | 13017.2 | 5.169 | 0.900 | 4.576 | 3.181 | 81.564 | 16.76 | 169.731259 | 7.042706 |
+| pagekv_random_static | 23.73 | 28.94 | 54.63 | 31.54 | 34.71 | 26.70 | 13017.2 | 7.086 | 0.881 | 5.735 | 3.129 | 134.320 | 16.86 | 170.637017 | 7.399508 |
+| tokenkv_quest_bounds_static | 29.76 | 41.91 | 55.82 | 32.97 | 40.12 | 26.70 | 13017.7 | 6.312 | 0.868 | 4.883 | 3.087 | 114.879 | 15.31 | 170.318319 | 6.817918 |
+| tokenkv_snapkv_static | 30.34 | 42.52 | 55.79 | 33.01 | 40.41 | 26.70 | 13017.7 | 5.813 | 0.901 | 4.071 | 3.162 | 105.885 | 17.61 | 170.531383 | 8.003653 |
+| tokenkv_h2o_static | 30.03 | 40.08 | 55.86 | 32.27 | 39.56 | 26.70 | 13017.7 | 5.579 | 0.883 | 5.458 | 3.119 | 76.120 | 17.75 | 169.741290 | 8.453359 |
+| tokenkv_recon_static | 30.48 | 42.10 | 56.21 | 33.47 | 40.56 | 26.70 | 13017.2 | 6.091 | 0.877 | 5.910 | 3.114 | 78.809 | 16.25 | 169.579216 | 7.350226 |
+| tokenkv_expected_attention_static | 30.66 | 41.64 | 55.94 | 32.90 | 40.28 | 26.70 | 13017.4 | 5.468 | 0.880 | 4.969 | 3.071 | 122.082 | 17.05 | 170.319666 | 7.297842 |
+| tokenkv_random_static | 22.03 | 24.84 | 54.59 | 29.85 | 32.83 | 26.70 | 13017.7 | 7.289 | 0.872 | 6.818 | 3.086 | 147.864 | 17.14 | 170.624572 | 7.278433 |
 
 ### Heuristic Routing Result: Latest Verified-Code Run
 
@@ -201,6 +267,25 @@ You can also set the tag directly:
 ```bash
 modal run --detach test.py::main_tokenkv_h2o_static --run-tag v7_custom
 ```
+
+## Baseline Cluster-Path Control
+`baseline_clusterpath_static` is a control experiment for measuring the overhead of the generalized `ClusterKVCache`/monkeypatch path without top-k compression. It uses `baseline_clusterpath_fullkv.json`, which sets `max_capacity_prompt=1000000`, so `update_kv()` should keep the full KV for normal LongBench contexts while still entering the `clusterkv` code path.
+
+Run it across all configured datasets on A100-80GB. The 40GB A100 path can OOM on long `lcc` examples because this control intentionally disables compression inside the generalized cache path.
+
+```bash
+modal run --detach test.py::main_baseline_clusterpath_static_a100_80gb --version <version>
+```
+
+Then evaluate and summarize:
+
+```bash
+modal run --detach test.py::main_eval_baseline_clusterpath_static --run-tag <run_tag>
+modal run test.py::main_verify_eval_method --method baseline_clusterpath_static --run-tag <run_tag>
+modal run test.py::main_csv --run-tag <run_tag>
+```
+
+Use this to compare against `baseline` when checking whether high generate-path memory comes from the generalized cache path itself rather than top-k compression.
 
 ## Routed Heuristic Experiment
 `heuristic_routing` is a single experiment label that routes each example to a backend using only fixed-cost prompt-window keyword checks plus the configured `max_gen`.

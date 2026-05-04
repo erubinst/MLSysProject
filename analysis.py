@@ -2,6 +2,7 @@
 KV Cache Compression Results — Figure Generator
 Produces:
     - Figure 1: Static vs. Dynamic grouped bar chart (accuracy)
+    - Figure 2: Static average accuracy line plot by granularity and scoring backend
     - Figure 3: TFLOPs vs. Accuracy scatter (static vs. dynamic)
     - Figure 4: Throughput vs. Accuracy scatter (static vs. dynamic)
     - Figure 5: Full results table (LaTeX + CSV)
@@ -44,6 +45,18 @@ STATIC_COLOR  = "#333333"
 DYNAMIC_COLOR = "#990000"
 TIMEOUT_COLOR = "#bbbbbb"
 
+GRANULARITY_COLORS = {
+    "clusterattn": "#7a2e2e",
+    "pagekv": "#1f6f78",
+    "tokenkv": "#b87900",
+}
+
+GRANULARITY_LINE_LABELS = {
+    "clusterattn": "Cluster / block-density",
+    "pagekv": "Page",
+    "tokenkv": "Token",
+}
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def parse_float(val):
@@ -84,9 +97,13 @@ def parse_static_readme_table(path="README.md"):
     with open(path, encoding="utf-8") as f:
         text = f.read()
 
-    marker = "### Current benchmark snapshot"
-    if marker not in text:
-        raise ValueError(f"Could not find '{marker}' in {path}")
+    markers = [
+        "### Merged Static Result: `v1_20260427_030527` + `v9_20260503_152041`",
+        "### Current benchmark snapshot",
+    ]
+    marker = next((m for m in markers if m in text), None)
+    if marker is None:
+        raise ValueError(f"Could not find a static benchmark table in {path}")
 
     sub = text[text.index(marker):]
     lines = [ln for ln in sub.splitlines() if ln.startswith("|")]
@@ -321,6 +338,194 @@ def fig1_static_vs_dynamic(static_rows, dynamic_rows, outdir):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 2: Static average accuracy line plot
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig2_static_accuracy_line(static_rows, outdir):
+    granularities = ["clusterattn", "pagekv", "tokenkv"]
+    scorings = ["snapkv", "quest_bounds", "h2o", "recon", "expected_attention", "random"]
+    x = list(range(len(scorings)))
+    xlabels = [SCORING_LABELS[s] for s in scorings]
+
+    row_by_parts = {}
+    for row in static_rows:
+        gran, scoring = extract_parts(row["method"])
+        if gran in granularities and scoring in scorings and row.get("avg") is not None:
+            row_by_parts[(gran, scoring)] = row
+
+    baseline = next((r for r in static_rows if r["method"] == "baseline"), None)
+    baseline_y = baseline["avg"] if baseline else None
+
+    fig = go.Figure()
+
+    if baseline_y is not None:
+        fig.add_hline(
+            y=baseline_y,
+            line=dict(color="#2b2b2b", width=2, dash="dash"),
+            annotation_text=f"Baseline {baseline_y:.2f}",
+            annotation_position="top right",
+            annotation_font=dict(size=12, color="#2b2b2b"),
+        )
+
+    best_global = None
+    for gran in granularities:
+        ys = []
+        hover = []
+        methods = []
+        for scoring in scorings:
+            row = row_by_parts.get((gran, scoring))
+            ys.append(row["avg"] if row else None)
+            methods.append(row["method"] if row else "")
+            hover.append(
+                f"{row['method']}<br>{GRANULARITY_LINE_LABELS[gran]} + {SCORING_LABELS[scoring]}<br>"
+                f"Average accuracy: {row['avg']:.2f}<extra></extra>"
+                if row else ""
+            )
+
+        color = GRANULARITY_COLORS[gran]
+        fig.add_trace(go.Scatter(
+            x=x,
+            y=ys,
+            mode="lines+markers",
+            connectgaps=False,
+            name=GRANULARITY_LINE_LABELS[gran],
+            line=dict(color=color, width=3, dash="dot"),
+            marker=dict(size=10, color=color, line=dict(color="white", width=1.2)),
+            customdata=methods,
+            hovertemplate=hover,
+        ))
+
+        label_shift = {
+            "clusterattn": 24,
+            "pagekv": -24,
+            "tokenkv": -42,
+        }[gran]
+        for xi, yi in zip(x, ys):
+            if yi is None:
+                continue
+            xshift = 0
+            if xi in (4, 5):
+                xshift = {
+                    "clusterattn": -18,
+                    "pagekv": 18,
+                    "tokenkv": 0,
+                }[gran]
+            fig.add_annotation(
+                x=xi,
+                y=yi,
+                text=f"{yi:.2f}",
+                showarrow=False,
+                xanchor="center",
+                yanchor="bottom" if label_shift > 0 else "top",
+                xshift=xshift,
+                yshift=label_shift,
+                font=dict(size=10, color=color),
+                bgcolor="rgba(255,255,255,0.65)",
+                borderpad=1,
+            )
+
+        valid_points = [(idx, val) for idx, val in enumerate(ys) if val is not None]
+        if not valid_points:
+            continue
+        best_idx, best_val = max(valid_points, key=lambda item: item[1])
+        best_row = row_by_parts[(gran, scorings[best_idx])]
+        if best_global is None or best_val > best_global["avg"]:
+            best_global = {"gran": gran, "idx": best_idx, "avg": best_val, "row": best_row}
+
+        fig.add_trace(go.Scatter(
+            x=[best_idx],
+            y=[best_val],
+            mode="markers",
+            marker=dict(
+                symbol="star",
+                size=17,
+                color=color,
+                line=dict(color="#111111", width=1.8),
+            ),
+            showlegend=False,
+            hovertemplate=(
+                f"Best {GRANULARITY_LINE_LABELS[gran]}<br>{best_row['method']}<br>"
+                f"Average accuracy: {best_val:.2f}<extra></extra>"
+            ),
+        ))
+
+        offset = {
+            "clusterattn": (-95, -85),
+            "pagekv": (-85, 82),
+            "tokenkv": (112, -72),
+        }[gran]
+        fig.add_annotation(
+            x=best_idx,
+            y=best_val,
+            text=(
+                f"<span style='color:{color}'><b>Best {GRANULARITY_LINE_LABELS[gran]}</b><br>"
+                f"{METHOD_DISPLAY.get(best_row['method'], best_row['method'])} ({best_val:.2f})</span>"
+            ),
+            showarrow=True,
+            arrowhead=2,
+            ax=offset[0],
+            ay=offset[1],
+            font=dict(size=11, color=color),
+            bgcolor="rgba(255,255,255,0.92)",
+            bordercolor=color,
+            borderwidth=1,
+        )
+
+    if best_global is not None:
+        fig.add_annotation(
+            x=0.98,
+            xref="paper",
+            y=1,
+            yref="paper",
+            text=f"Overall best: {best_global['row']['method']} ({best_global['avg']:.2f})",
+            showarrow=False,
+            xanchor="right",
+            yanchor="bottom",
+            font=dict(size=12, color="#111111"),
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#111111",
+            borderwidth=1,
+        )
+
+    y_values = [
+        row["avg"]
+        for row in row_by_parts.values()
+        if row.get("avg") is not None
+    ]
+    if baseline_y is not None:
+        y_values.append(baseline_y)
+    y_min = max(20, min(y_values) - 3.0) if y_values else 30
+    y_max = max(y_values) + 3.0 if y_values else 45
+
+    fig.update_xaxes(
+        title="Eviction / scoring backend",
+        tickmode="array",
+        tickvals=x,
+        ticktext=xlabels,
+        showgrid=False,
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title="Average LongBench accuracy",
+        range=[y_min, y_max],
+        showgrid=True,
+        gridcolor="#eeeeee",
+        zeroline=False,
+    )
+    base_layout(
+        fig,
+        "Figure 2: Static Average Accuracy by Granularity and Eviction Backend",
+        width=960,
+        height=660,
+    )
+    fig.update_layout(
+        legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+        margin=dict(l=70, r=170, t=140, b=105),
+    )
+    _save(fig, outdir, "fig2_static_accuracy_line")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Figures 3 & 4: Scatter plots (shared helper)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -409,6 +614,7 @@ def fig4_throughput_vs_accuracy(static_rows, dynamic_rows, outdir):
 
 METHOD_DISPLAY = {
     "baseline":                               "Full Precision",
+    "baseline_clusterpath_static":            "Full KV (ClusterKV path)",
     "snapkv_static":                          "SnapKV",
     "quest_static":                           "Quest",
     "clusterattn_static":                     "ClusterAttn (snapkv)",
@@ -445,7 +651,7 @@ METHOD_DISPLAY = {
 }
 
 TABLE_ORDER = [
-    "baseline", "snapkv_static", "quest_static",
+    "baseline", "baseline_clusterpath_static", "snapkv_static", "quest_static",
     "clusterattn_static",
     "clusterattn_quest_bounds_static", "clusterattn_snapkv_static",
     "clusterattn_h2o_static", "clusterattn_recon_static",
@@ -560,6 +766,12 @@ def fig5_full_table(static_rows, dynamic_rows, outdir):
 def fig6_latency_breakdown(static_rows, dynamic_rows, outdir):
     dyn_scorings  = ["quest_bounds", "h2o", "random"]
     granularities = ["clusterattn", "pagekv", "tokenkv"]
+    static_prefill_color = "#8ecae6"
+    static_decode_color = "#126782"
+    static_line_color = "#023047"
+    dynamic_prefill_color = "#f4a261"
+    dynamic_decode_color = "#c1121f"
+    dynamic_line_color = "#780000"
     entries = []
     for gran in granularities:
         for scoring in dyn_scorings:
@@ -571,6 +783,8 @@ def fig6_latency_breakdown(static_rows, dynamic_rows, outdir):
                 "gran":      gran,
                 "scoring":   scoring,
                 "s_lat":     s["latency"],
+                "s_prefill": s["prefill_lat"],
+                "s_decode":  s["decode_lat"],
                 "d_prefill": d["prefill_lat"] if d and not d["timed_out"] else None,
                 "d_decode":  d["decode_lat"]  if d and not d["timed_out"] else None,
                 "timed_out": d["timed_out"]   if d else True,
@@ -582,16 +796,34 @@ def fig6_latency_breakdown(static_rows, dynamic_rows, outdir):
     dx = [xi + offset for xi in x]
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=sx, y=[e["s_lat"] for e in entries], width=bar_w,
-        marker=dict(color=STATIC_COLOR, opacity=0.85), name="Static (total)",
-        text=[f"{e['s_lat']:.1f}s" if e["s_lat"] else "" for e in entries],
+    static_prefill = [
+        e["s_prefill"] if e["s_prefill"] is not None else None
+        for e in entries
+    ]
+    static_decode = [
+        e["s_decode"] if e["s_decode"] is not None else (
+            e["s_lat"] if e["s_lat"] is not None else None
+        )
+        for e in entries
+    ]
+    fig.add_trace(go.Bar(x=sx, y=static_prefill, width=bar_w,
+        marker=dict(color=static_prefill_color, opacity=0.72), name="Static — prefill",
+        hovertemplate="Static prefill<br>%{y:.2f}s<extra></extra>"))
+    fig.add_trace(go.Bar(x=sx, y=static_decode, width=bar_w,
+        marker=dict(color=static_decode_color, opacity=0.92), name="Static — decode",
+        text=[
+            f"{((e['s_prefill'] or 0) + (e['s_decode'] or 0)):.1f}s"
+            if e["s_prefill"] is not None and e["s_decode"] is not None
+            else (f"{e['s_lat']:.1f}s" if e["s_lat"] is not None else "")
+            for e in entries
+        ],
         textposition="outside",
-        hovertemplate="Static total<br>%{y:.2f}s<extra></extra>"))
+        hovertemplate="Static decode<br>%{y:.2f}s<extra></extra>"))
     fig.add_trace(go.Bar(x=dx, y=[e["d_prefill"] for e in entries], width=bar_w,
-        marker=dict(color=DYNAMIC_COLOR, opacity=0.65), name="Dynamic — prefill",
+        marker=dict(color=dynamic_prefill_color, opacity=0.72), name="Dynamic — prefill",
         hovertemplate="Dynamic prefill<br>%{y:.2f}s<extra></extra>"))
     fig.add_trace(go.Bar(x=dx, y=[e["d_decode"] for e in entries], width=bar_w,
-        marker=dict(color=DYNAMIC_COLOR, opacity=1.0), name="Dynamic — decode",
+        marker=dict(color=dynamic_decode_color, opacity=0.92), name="Dynamic — decode",
         text=[f"{(e['d_prefill'] or 0)+(e['d_decode'] or 0):.1f}s"
               if e["d_prefill"] and e["d_decode"] else "" for e in entries],
         textposition="outside",
@@ -614,8 +846,8 @@ def fig6_latency_breakdown(static_rows, dynamic_rows, outdir):
         ticktext=[e["label"] for e in entries], showgrid=False, zeroline=False)
     fig.update_yaxes(title="Average latency per example (s)",
         showgrid=True, gridcolor="#eeeeee", zeroline=False)
-    base_layout(fig, "Figure 6: Latency Breakdown — Static (total) vs. Dynamic (prefill + decode)",
-                width=980, height=470)
+    base_layout(fig, "Figure 6: Latency Breakdown — Static vs. Dynamic",
+                width=1020, height=500)
     fig.update_layout(barmode="stack",
         legend=dict(orientation="h", yanchor="top", y=1.12, xanchor="center", x=0.5),
         margin=dict(l=60, r=25, t=90, b=90))
@@ -641,11 +873,14 @@ def fig7_per_task_heatmap(static_rows, outdir):
         if gran and scoring:
             lookup[(gran, scoring)] = r
 
-    fig = make_subplots(rows=1, cols=4,
+    fig = make_subplots(rows=2, cols=2,
         subplot_titles=tasks,
-        horizontal_spacing=0.14)
+        horizontal_spacing=0.16,
+        vertical_spacing=0.24)
 
     for ti, task in enumerate(tasks):
+        row_idx = ti // 2 + 1
+        col_idx = ti % 2 + 1
         z, text = [], []
         for gran in granularities:
             row_z, row_t = [], []
@@ -670,15 +905,20 @@ def fig7_per_task_heatmap(static_rows, outdir):
             y=[gran_labels[g]   for g in granularities],
             text=text, texttemplate="%{text}",
             textfont=dict(size=11),
-            colorscale=[[0.0, "#f7f7f7"], [0.5, "#aaaaaa"], [1.0, "#333333"]],
+            colorscale=[
+                [0.0, "#fff7bc"],
+                [0.35, "#fec44f"],
+                [0.7, "#d95f0e"],
+                [1.0, "#7f2704"],
+            ],
             zmin=zmin, zmax=zmax,
             showscale=(ti == 3),
-            colorbar=dict(x=1.02, len=0.9,
+            colorbar=dict(x=1.02, len=0.82,
                 title=dict(text="Score", side="right"), thickness=14),
             hovertemplate=(
                 "Granularity: %{y}<br>Scoring: %{x}<br>"
                 f"Task: {task}<br>Score: %{{text}}<extra></extra>"),
-        ), row=1, col=ti+1)
+        ), row=row_idx, col=col_idx)
 
     fig.update_layout(
         title=dict(
@@ -686,9 +926,9 @@ def fig7_per_task_heatmap(static_rows, outdir):
                  "(Granularity × Scoring Backend)",
             x=0.5, xanchor="center"),
         template="plotly_white",
-        width=1300, height=380,
+        width=1000, height=720,
         font=dict(family="Arial, sans-serif", size=11),
-        margin=dict(l=120, r=90, t=70, b=60),
+        margin=dict(l=120, r=90, t=80, b=80),
     )
     _save(fig, outdir, "fig7_per_task_heatmap")
 
@@ -770,47 +1010,127 @@ def fig8_scoring_backend_comparison(static_rows, outdir):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fig9_static_latency_comparison(static_rows, outdir):
-    bar_color = "#7a0000"
+    granularities = ["clusterattn", "pagekv", "tokenkv"]
+    grouped = {gran: [] for gran in granularities}
+    for row in static_rows:
+        gran, _ = extract_parts(row["method"])
+        if gran in grouped and row.get("latency") is not None:
+            grouped[gran].append(row)
 
-    rows = [r for r in static_rows if r["latency"] is not None]
-    rows.sort(key=lambda r: (r["latency"], r["method"]), reverse=True)
-
-    labels = [METHOD_DISPLAY.get(r["method"], r["method"]) for r in rows]
-    hover = []
-    latencies = []
-    for r in rows:
-        latencies.append(r["latency"])
-        hover.append(
-            f"{METHOD_DISPLAY.get(r['method'], r['method'])}<br>"
-            f"Average latency: {r['latency']:.3f}s<br>"
-            f"Average accuracy: {fmt(r['avg'])}"
-        )
+    x_labels = [GRANULARITY_LINE_LABELS[gran] for gran in granularities]
+    lows, q1s, medians, q3s, highs = [], [], [], [], []
+    for gran in granularities:
+        vals = sorted(row["latency"] for row in grouped[gran])
+        if vals:
+            lows.append(min(vals))
+            q1s.append(float(np.percentile(vals, 25)))
+            medians.append(float(np.percentile(vals, 50)))
+            q3s.append(float(np.percentile(vals, 75)))
+            highs.append(max(vals))
+        else:
+            lows.append(None)
+            q1s.append(None)
+            medians.append(None)
+            q3s.append(None)
+            highs.append(None)
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=latencies,
-        y=labels,
-        orientation="h",
-        marker=dict(color=bar_color, opacity=0.9),
-        text=[f"{lat:.2f}s" for lat in latencies],
-        textposition="outside",
-        textfont=dict(size=10),
-        hovertext=hover,
-        hoverinfo="text",
-        showlegend=False,
+
+    for idx, gran in enumerate(granularities):
+        color = GRANULARITY_COLORS[gran]
+        fig.add_trace(go.Candlestick(
+            x=[x_labels[idx]],
+            open=[q1s[idx]],
+            high=[highs[idx]],
+            low=[lows[idx]],
+            close=[q3s[idx]],
+            increasing=dict(line=dict(color=color, width=2), fillcolor=color),
+            decreasing=dict(line=dict(color=color, width=2), fillcolor=color),
+            whiskerwidth=0.45,
+            name=f"{GRANULARITY_LINE_LABELS[gran]} latency range",
+            customdata=[medians[idx]],
+            opacity=0.55,
+            hovertemplate=(
+                "%{x}<br>"
+                "Min: %{low:.3f}s<br>"
+                "Q1: %{open:.3f}s<br>"
+                "Median: %{customdata:.3f}s<br>"
+                "Q3: %{close:.3f}s<br>"
+                "Max: %{high:.3f}s<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    for gran, label in zip(granularities, x_labels):
+        rows = grouped[gran]
+        if not rows:
+            continue
+        color = GRANULARITY_COLORS[gran]
+        fig.add_trace(go.Scatter(
+            x=[label] * len(rows),
+            y=[row["latency"] for row in rows],
+            mode="markers",
+            marker=dict(size=9, color=color, opacity=0.85, line=dict(color="white", width=1)),
+            showlegend=False,
+            hovertemplate=[
+                f"{METHOD_DISPLAY.get(row['method'], row['method'])}<br>"
+                f"Latency: {row['latency']:.3f}s<br>"
+                f"Average accuracy: {fmt(row['avg'])}<extra></extra>"
+                for row in rows
+            ],
+        ))
+
+        best = min(rows, key=lambda row: row["latency"])
+        fig.add_trace(go.Scatter(
+            x=[label],
+            y=[best["latency"]],
+            mode="markers+text",
+            marker=dict(symbol="star", size=17, color=color, line=dict(color="#111111", width=1.5)),
+            text=[f"best: {METHOD_DISPLAY.get(best['method'], best['method'])}<br>{best['latency']:.2f}s"],
+            textposition="bottom center",
+            textfont=dict(size=10, color="#111111"),
+            showlegend=False,
+            hovertemplate=(
+                f"Best latency in {label}<br>{best['method']}<br>"
+                f"Latency: {best['latency']:.3f}s<br>"
+                f"Average accuracy: {fmt(best['avg'])}<extra></extra>"
+            ),
+        ))
+
+    baseline = next((r for r in static_rows if r["method"] == "baseline" and r.get("latency") is not None), None)
+    if baseline:
+        fig.add_hline(
+            y=baseline["latency"],
+            line=dict(color="#2b2b2b", width=2, dash="dash"),
+            annotation_text=f"Baseline {baseline['latency']:.2f}s",
+            annotation_position="top right",
+            annotation_font=dict(size=11, color="#2b2b2b"),
+        )
+
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(symbol="star", size=14, color="#555555", line=dict(color="#111111", width=1)),
+        name="Best latency per granularity", hoverinfo="skip",
     ))
+
+    y_values = [row["latency"] for rows in grouped.values() for row in rows]
+    if baseline:
+        y_values.append(baseline["latency"])
+    y_max = max(y_values) * 1.15 if y_values else 10
 
     fig.update_layout(
         title=dict(
-            text="Figure 9: Static-Only Average Latency Comparison",
+            text="Figure 9: Static Latency Distribution by Granularity",
             x=0.5, xanchor="center"),
         template="plotly_white",
-        width=980, height=760,
+        width=900, height=560,
         font=dict(family="Arial, sans-serif", size=12),
-        margin=dict(l=180, r=70, t=80, b=60),
-        xaxis=dict(title="Average latency per example (s)", showgrid=True,
-                   gridcolor="#eeeeee", zeroline=False),
-        yaxis=dict(title="Static methods", autorange="reversed", showgrid=False),
+        margin=dict(l=70, r=90, t=80, b=80),
+        xaxis=dict(title="Granularity", showgrid=False, zeroline=False),
+        yaxis=dict(title="Average latency per example (s)", range=[0, y_max],
+                   showgrid=True, gridcolor="#eeeeee", zeroline=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        xaxis_rangeslider_visible=False,
     )
     _save(fig, outdir, "fig9_static_latency_comparison")
 
@@ -820,47 +1140,127 @@ def fig9_static_latency_comparison(static_rows, outdir):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fig10_static_throughput_comparison(static_rows, outdir):
-    bar_color = "#7a0000"
+    granularities = ["clusterattn", "pagekv", "tokenkv"]
+    grouped = {gran: [] for gran in granularities}
+    for r in static_rows:
+        gran, _ = extract_parts(r["method"])
+        if gran in grouped and r.get("throughput") is not None:
+            grouped[gran].append(r)
 
-    rows = [r for r in static_rows if r["throughput"] is not None]
-    rows.sort(key=lambda r: (r["throughput"], r["method"]), reverse=True)
-
-    labels = [METHOD_DISPLAY.get(r["method"], r["method"]) for r in rows]
-    hover = []
-    throughputs = []
-    for r in rows:
-        throughputs.append(r["throughput"])
-        hover.append(
-            f"{METHOD_DISPLAY.get(r['method'], r['method'])}<br>"
-            f"Throughput: {r['throughput']:.2f} tok/s<br>"
-            f"Average accuracy: {fmt(r['avg'])}"
-        )
+    x_labels = [GRANULARITY_LINE_LABELS[gran] for gran in granularities]
+    lows, q1s, medians, q3s, highs = [], [], [], [], []
+    for gran in granularities:
+        vals = sorted(row["throughput"] for row in grouped[gran])
+        if vals:
+            lows.append(min(vals))
+            q1s.append(float(np.percentile(vals, 25)))
+            medians.append(float(np.percentile(vals, 50)))
+            q3s.append(float(np.percentile(vals, 75)))
+            highs.append(max(vals))
+        else:
+            lows.append(None)
+            q1s.append(None)
+            medians.append(None)
+            q3s.append(None)
+            highs.append(None)
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=throughputs,
-        y=labels,
-        orientation="h",
-        marker=dict(color=bar_color, opacity=0.9),
-        text=[f"{t:.1f} tok/s" for t in throughputs],
-        textposition="outside",
-        textfont=dict(size=10),
-        hovertext=hover,
-        hoverinfo="text",
-        showlegend=False,
+
+    for idx, gran in enumerate(granularities):
+        color = GRANULARITY_COLORS[gran]
+        fig.add_trace(go.Candlestick(
+            x=[x_labels[idx]],
+            open=[q1s[idx]],
+            high=[highs[idx]],
+            low=[lows[idx]],
+            close=[q3s[idx]],
+            increasing=dict(line=dict(color=color, width=2), fillcolor=color),
+            decreasing=dict(line=dict(color=color, width=2), fillcolor=color),
+            whiskerwidth=0.45,
+            opacity=0.55,
+            name=f"{GRANULARITY_LINE_LABELS[gran]} throughput range",
+            customdata=[medians[idx]],
+            hovertemplate=(
+                "%{x}<br>"
+                "Min: %{low:.2f} tok/s<br>"
+                "Q1: %{open:.2f} tok/s<br>"
+                "Median: %{customdata:.2f} tok/s<br>"
+                "Q3: %{close:.2f} tok/s<br>"
+                "Max: %{high:.2f} tok/s<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    for gran, label in zip(granularities, x_labels):
+        rows = grouped[gran]
+        if not rows:
+            continue
+        color = GRANULARITY_COLORS[gran]
+        fig.add_trace(go.Scatter(
+            x=[label] * len(rows),
+            y=[row["throughput"] for row in rows],
+            mode="markers",
+            marker=dict(size=9, color=color, opacity=0.85, line=dict(color="white", width=1)),
+            showlegend=False,
+            hovertemplate=[
+                f"{METHOD_DISPLAY.get(row['method'], row['method'])}<br>"
+                f"Throughput: {row['throughput']:.2f} tok/s<br>"
+                f"Average accuracy: {fmt(row['avg'])}<extra></extra>"
+                for row in rows
+            ],
+        ))
+
+        best = max(rows, key=lambda row: row["throughput"])
+        fig.add_trace(go.Scatter(
+            x=[label],
+            y=[best["throughput"]],
+            mode="markers+text",
+            marker=dict(symbol="star", size=17, color=color, line=dict(color="#111111", width=1.5)),
+            text=[f"best: {METHOD_DISPLAY.get(best['method'], best['method'])}<br>{best['throughput']:.1f} tok/s"],
+            textposition="top center",
+            textfont=dict(size=10, color="#111111"),
+            showlegend=False,
+            hovertemplate=(
+                f"Best throughput in {label}<br>{best['method']}<br>"
+                f"Throughput: {best['throughput']:.2f} tok/s<br>"
+                f"Average accuracy: {fmt(best['avg'])}<extra></extra>"
+            ),
+        ))
+
+    baseline = next((r for r in static_rows if r["method"] == "baseline" and r.get("throughput") is not None), None)
+    if baseline:
+        fig.add_hline(
+            y=baseline["throughput"],
+            line=dict(color="#2b2b2b", width=2, dash="dash"),
+            annotation_text=f"Baseline {baseline['throughput']:.1f} tok/s",
+            annotation_position="top right",
+            annotation_font=dict(size=11, color="#2b2b2b"),
+        )
+
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(symbol="star", size=14, color="#555555", line=dict(color="#111111", width=1)),
+        name="Best throughput per granularity", hoverinfo="skip",
     ))
+
+    y_values = [row["throughput"] for rows in grouped.values() for row in rows]
+    if baseline:
+        y_values.append(baseline["throughput"])
+    y_max = max(y_values) * 1.15 if y_values else 20
 
     fig.update_layout(
         title=dict(
-            text="Figure 10: Static-Only Throughput Comparison",
+            text="Figure 10: Static Throughput Distribution by Granularity",
             x=0.5, xanchor="center"),
         template="plotly_white",
-        width=980, height=760,
+        width=900, height=560,
         font=dict(family="Arial, sans-serif", size=12),
-        margin=dict(l=180, r=70, t=80, b=60),
-        xaxis=dict(title="Throughput (tok/s)", showgrid=True,
-                   gridcolor="#eeeeee", zeroline=False),
-        yaxis=dict(title="Static methods", autorange="reversed", showgrid=False),
+        margin=dict(l=70, r=90, t=80, b=80),
+        xaxis=dict(title="Granularity", showgrid=False, zeroline=False),
+        yaxis=dict(title="Throughput (tok/s)", range=[0, y_max],
+                   showgrid=True, gridcolor="#eeeeee", zeroline=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        xaxis_rangeslider_visible=False,
     )
     _save(fig, outdir, "fig10_static_throughput_comparison")
 
@@ -874,23 +1274,32 @@ def fig11_avg_static_dynamic_comparison(static_rows, dynamic_rows, outdir):
     labels = [r["label"] for r in rows]
     static_vals = [r["static_avg"] for r in rows]
     dynamic_vals = [None if r["timed_out"] else r["dynamic_avg"] for r in rows]
+    x = np.arange(len(rows))
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=static_vals, y=labels, orientation="h",
-        marker=dict(color=STATIC_COLOR, opacity=0.9),
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=static_vals,
+        mode="lines+markers+text",
+        line=dict(color="#126782", width=3),
+        marker=dict(color="#126782", size=9),
         name="Static",
         text=[f"{v:.2f}" if v is not None else "" for v in static_vals],
-        textposition="outside",
-        hovertemplate="Static<br>Avg score: %{x:.2f}<extra></extra>",
+        textposition="top center",
+        hovertemplate="Static<br>%{customdata}<br>Avg score: %{y:.2f}<extra></extra>",
+        customdata=labels,
     ))
-    fig.add_trace(go.Bar(
-        x=dynamic_vals, y=labels, orientation="h",
-        marker=dict(color=DYNAMIC_COLOR, opacity=0.9),
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=dynamic_vals,
+        mode="lines+markers+text",
+        line=dict(color="#c1121f", width=3),
+        marker=dict(color="#c1121f", size=9),
         name="Dynamic",
         text=[f"{v:.2f}" if v is not None else "T/O" for v in dynamic_vals],
-        textposition="outside",
-        hovertemplate="Dynamic<br>Avg score: %{x:.2f}<extra></extra>",
+        textposition="bottom center",
+        hovertemplate="Dynamic<br>%{customdata}<br>Avg score: %{y:.2f}<extra></extra>",
+        customdata=labels,
     ))
 
     for idx, r in enumerate(rows):
@@ -899,35 +1308,57 @@ def fig11_avg_static_dynamic_comparison(static_rows, dynamic_rows, outdir):
         delta = r["dynamic_avg"] - r["static_avg"]
         sign = "+" if delta >= 0 else ""
         fig.add_annotation(
-            x=max(r["static_avg"], r["dynamic_avg"]) + 0.7,
-            y=labels[idx],
+            x=x[idx],
+            y=max(r["static_avg"], r["dynamic_avg"]) + 0.55,
             text=f"{sign}{delta:.2f}",
             showarrow=False,
-            xanchor="left",
-            yanchor="middle",
+            xanchor="center",
+            yanchor="bottom",
             font=dict(size=10, color="#555555"),
         )
 
-    fig.add_annotation(
-        x=40.16, y="tokenkv<br>Quest bounds",
-        text="best dynamic",
-        showarrow=True, arrowhead=2, ax=55, ay=-12,
-        font=dict(size=11, color="#222222"),
+    best_dynamic = max(
+        (r for r in rows if not r["timed_out"] and r["dynamic_avg"] is not None),
+        key=lambda r: r["dynamic_avg"],
+        default=None,
     )
+    if best_dynamic is not None:
+        best_idx = rows.index(best_dynamic)
+        fig.add_annotation(
+            x=x[best_idx],
+            y=best_dynamic["dynamic_avg"],
+            text="best dynamic",
+            showarrow=True,
+            arrowhead=2,
+            ax=50,
+            ay=-35,
+            font=dict(size=11, color="#222222"),
+        )
 
     fig.update_layout(
-        barmode="group",
         template="plotly_white",
-        width=980,
-        height=520,
+        width=1020,
+        height=500,
         title=dict(
-            text="Figure 11: Avg Performance — Static vs. Dynamic (Quest bounds and H2O)",
+            text="Figure 11: Average Score Trend — Static vs. Dynamic (Quest bounds and H2O)",
             x=0.5, xanchor="center"
         ),
         font=dict(family="Arial, sans-serif", size=12),
-        margin=dict(l=170, r=90, t=70, b=60),
-        xaxis=dict(title="Average score (higher is better)", showgrid=True, gridcolor="#eeeeee", zeroline=False),
-        yaxis=dict(title="", autorange="reversed", showgrid=False),
+        margin=dict(l=70, r=50, t=70, b=120),
+        xaxis=dict(
+            title="Method combination",
+            tickmode="array",
+            tickvals=x,
+            ticktext=labels,
+            showgrid=False,
+            zeroline=False,
+        ),
+        yaxis=dict(
+            title="Average score (higher is better)",
+            showgrid=True,
+            gridcolor="#eeeeee",
+            zeroline=False,
+        ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
     )
     _save(fig, outdir, "fig11_avg_static_dynamic_comparison")
@@ -1018,12 +1449,13 @@ def main():
         print(f"Loaded static rows from {args.static}")
     else:
         static_rows = parse_static_readme_table("README.md")
-        print("Loaded static rows from README.md current benchmark table")
+        print("Loaded static rows from README.md merged/current benchmark table")
     dynamic_rows = parse_dynamic_csv(args.dynamic)
     n_timed = sum(1 for r in dynamic_rows if r["timed_out"])
     print(f"Loaded {len(static_rows)} static, {len(dynamic_rows)} dynamic ({n_timed} timed out)")
 
     fig1_static_vs_dynamic(static_rows, dynamic_rows, args.outdir)
+    fig2_static_accuracy_line(static_rows, args.outdir)
     fig3_tflops_vs_accuracy(static_rows, dynamic_rows, args.outdir)
     fig4_throughput_vs_accuracy(static_rows, dynamic_rows, args.outdir)
     fig5_full_table(static_rows, dynamic_rows, args.outdir)
