@@ -117,7 +117,7 @@ This is the recommended way to submit longer inference or evaluation jobs.
 
 | Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 25.93 | 12223.1 | 8.130 | 0.854 | 7.276 | 2.959 | 93.611 | 13.57 | 169.639661 | 6.592069 |
+| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 56.21 | 43232.3 | 6.209 | 0.936 | 5.273 | 3.234 | 61.030 | 16.91 | 169.639661 | 7.255866 |
 | snapkv_static | 30.52 | 42.31 | 55.98 | 33.38 | 40.55 | 21.87 | 8071.6 | 6.084 | 0.879 | 5.205 | 3.012 | 89.932 | 15.55 | 169.902572 | 6.899190 |
 | quest_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 21.87 | 8071.6 | 6.177 | 0.888 | 5.289 | 3.057 | 111.505 | 15.20 | 170.151672 | 6.470891 |
 | clusterattn_static | 30.30 | 42.69 | 55.82 | 33.19 | 40.50 | 31.53 | 17963.7 | 6.377 | 1.012 | 5.364 | 3.272 | 129.804 | 14.75 | 170.492271 | 5.259820 |
@@ -144,18 +144,28 @@ Full CSV: `/models/runs/v9_20260503_152041/results/summary.csv`.
 
 Analysis:
 - Accuracy is stable relative to the earlier static run. The best average remains `40.56`, reached by `clusterattn_recon_static` and `tokenkv_recon_static`.
-- `baseline` is still the highest overall score at `41.12`, but compressed static methods are close while reducing memory relative to full precision for standalone `snapkv_static`/`quest_static`.
+- `baseline` now denotes the full-KV cluster-path control from `v12_20260504_042828`, so systems metrics are comparable to the generalized `clusterattn`/`pagekv`/`tokenkv` path. Accuracy is unchanged from native full precision at `41.12`.
 - The generalized `clusterattn`/`pagekv`/`tokenkv` backend now reports about `31.53 GB` peak and `~17.96 GB` extra generate-path memory. This should be interpreted as extra generate-path peak memory, not pure retained KV size.
 - `tokenkv_snapkv_static` is the fastest useful compressed static method in this refresh (`4.973s`, `18.14 tok/s`) while keeping average accuracy at `40.41`.
 - Total profiled TFLOPs is effectively unchanged across static methods, so systems differences are mostly visible in memory, latency, throughput, and TFLOPs/s.
 
-### Merged Static Result: `v1_20260427_030527` + `v9_20260503_152041`
+### Full-KV Cluster-Path Baseline: `v12_20260504_042828`
 
-For columns present in both static runs, this table reports the arithmetic mean. For columns missing from the earlier run, it uses the `v9_20260503_152041` value. The same data is available to `analysis.py` at `figures/static_merged_v1_v9.csv`; when `analysis.py` is run without `--static`, it now reads this merged README table by default.
+This run uses `baseline_clusterpath_static` on A100-80GB and serves as the systems baseline for generalized-cache comparisons. It keeps full KV while entering the same `clusterkv` monkeypatch path used by the generalized methods.
 
 | Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 25.93 | 12223.1 | 7.931 | 0.854 | 7.276 | 2.959 | 93.611 | 14.59 | 169.639661 | 6.816846 |
+| baseline_clusterpath_static | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 56.21 | 43232.3 | 6.209 | 0.936 | 5.273 | 3.234 | 61.030 | 16.91 | 169.639661 | 7.255866 |
+
+For analysis plots and merged tables, this row replaces the native HuggingFace baseline row so the baseline uses the same generalized cache path as the proposed methods.
+
+### Merged Static Result: `v1_20260427_030527` + `v9_20260503_152041`
+
+For non-baseline rows, columns present in both static runs report the arithmetic mean. For columns missing from the earlier run, the table uses the `v9_20260503_152041` value. The baseline row uses the full-KV cluster-path baseline from `v12_20260504_042828` for a same-path systems comparison. The same data is available to `analysis.py` at `figures/static_merged_v1_v9.csv`; when `analysis.py` is run without `--static`, it now reads this merged README table by default.
+
+| Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Avg Prefill Latency (s) | Avg Decode Latency (s) | Max Prefill Latency (s) | Max Decode Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 56.21 | 43232.3 | 6.209 | 0.936 | 5.273 | 3.234 | 61.030 | 16.91 | 169.639661 | 7.255866 |
 | snapkv_static | 30.52 | 42.31 | 55.98 | 33.38 | 40.55 | 21.87 | 8071.6 | 6.050 | 0.879 | 5.205 | 3.012 | 89.932 | 15.07 | 169.902572 | 5.913721 |
 | quest_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 21.87 | 8071.6 | 5.787 | 0.888 | 5.289 | 3.057 | 111.505 | 16.23 | 170.151672 | 6.910643 |
 | clusterattn_static | 30.30 | 42.69 | 55.82 | 33.19 | 40.50 | 26.70 | 13017.7 | 7.117 | 1.012 | 5.364 | 3.272 | 129.804 | 14.32 | 170.492271 | 4.954475 |
@@ -745,14 +755,14 @@ Examples:
 Best current compressed method:
 - `clusterattn_recon_static`
 - Average score: `40.56` vs baseline `41.12`
-- Peak GPU: `21.87 GB` vs baseline `25.93 GB` for a `15.7%` reduction
-- KV cache: `8,071.6 MB` vs baseline `12,223.1 MB` for a `34.0%` reduction
-- Average latency: `5.374 s` vs baseline `7.733 s` for a `30.5%` reduction
+- Peak GPU: `21.87 GB` vs baseline `56.21 GB` for a `61.1%` reduction
+- KV cache: `8,071.6 MB` vs baseline `43,232.3 MB` for an `81.3%` reduction
+- Average latency: `5.374 s` vs baseline `6.209 s` for a `13.4%` reduction
 - Profiled TFLOPs: `169.579216` vs baseline `169.639661` with no meaningful reduction
 
 | Method | gov_report | hotpotqa | lcc | qasper | Average | Peak GPU (GB) | KV Cache (MB) | Avg Latency (s) | Throughput (tok/s) | Profiled TFLOPs | Profiled TFLOPs/s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 25.93 | 12223.1 | 7.733 | 15.6 | 169.639661 | 7.041622 |
+| baseline | 32.87 | 42.77 | 55.86 | 32.99 | 41.12 | 56.21 | 43232.3 | 6.209 | 16.91 | 169.639661 | 7.255866 |
 | snapkv_static | 30.52 | 42.31 | 55.98 | 33.38 | 40.55 | 21.87 | 8071.6 | 6.017 | 14.6 | 169.902572 | 4.928252 |
 | quest_static | 31.18 | 41.39 | 55.63 | 33.11 | 40.33 | 21.87 | 8071.6 | 5.396 | 17.25 | 170.151672 | 7.350395 |
 | clusterattn_static | 30.3 | 42.69 | 55.82 | 33.19 | 40.5 | 21.87 | 8071.6 | 7.856 | 13.9 | 170.492271 | 4.64913 |
