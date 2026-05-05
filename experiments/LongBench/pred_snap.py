@@ -33,6 +33,8 @@ def parse_args(args=None):
                         help="Directory containing xgb_router.json and xgb_router_metadata.json")
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('--dataset', type=str, default='qasper', help="Dataset to evaluate on")
+    parser.add_argument('--min_length', type=int, default=None, help="Optional minimum LongBench length to include")
+    parser.add_argument('--max_length', type=int, default=None, help="Optional maximum LongBench length to include")
     parser.add_argument('--limit', type=int, default=None, help="Optional number of examples to run")
     parser.add_argument('--sample_offset', type=int, default=0, help="Optional starting index into the dataset")
     parser.add_argument('--write_model_name', type=str, default=None, help="Explicit output subdirectory name for pred/pred_e")
@@ -612,6 +614,28 @@ if __name__ == '__main__':
     prompt_format = dataset2prompt[dataset]
     max_gen = dataset2maxlen[dataset]
     data_all = [data_sample for data_sample in data]
+
+    if args.min_length is not None or args.max_length is not None:
+        min_len = args.min_length
+        max_len = args.max_length
+        if min_len is not None and max_len is not None and min_len > max_len:
+            raise ValueError(f"Invalid length filter: min_length ({min_len}) > max_length ({max_len})")
+        filtered = []
+        for data_sample in data_all:
+            length = data_sample.get("length")
+            if length is None:
+                continue
+            if min_len is not None and length < min_len:
+                continue
+            if max_len is not None and length > max_len:
+                continue
+            filtered.append(data_sample)
+        data_all = filtered
+        print(
+            f"Length filter: min={min_len}, max={max_len}, "
+            f"kept={len(data_all)} examples"
+        )
+
     if args.sample_offset or args.limit is not None:
         start = max(args.sample_offset, 0)
         end = None if args.limit is None else start + max(args.limit, 0)
